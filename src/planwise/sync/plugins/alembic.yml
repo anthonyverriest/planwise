@@ -1,0 +1,92 @@
+name: alembic
+description: SQLAlchemy database migration tool
+
+actions:
+  check-heads:
+    command: alembic heads
+    success_pattern: "^[a-f0-9]+ \\(head\\)$"
+    timeout: 30
+    failure_patterns:
+      - pattern: "(?s)\\(head\\).*\\(head\\)"
+        message: "Multiple heads detected — migration branches diverged"
+        fix: "alembic merge heads -m 'merge migration heads'"
+    context: |
+      Alembic tracks migration state in the alembic_version table.
+      Multiple heads happen when two branches add migrations independently.
+      The agent should check `alembic history --verbose` and the migration
+      files in the migrations/versions directory to understand which
+      branches diverged before merging. After merging, verify with
+      `alembic heads` that only one head remains.
+
+  current:
+    command: alembic current
+    timeout: 30
+    failure_patterns:
+      - pattern: "FAILED.*Can't locate revision"
+        message: "Database points to a revision that no longer exists"
+        fix: ""
+    context: |
+      Shows which migration revision the database is currently at.
+      If the revision doesn't exist in the migration files, the database
+      was likely migrated with a branch that has since been removed.
+      Check `alembic history` and compare with the alembic_version table.
+
+  dry-run:
+    command: alembic upgrade head --sql
+    timeout: 60
+    failure_patterns:
+      - pattern: "FAILED"
+        message: "Migration dry-run failed"
+        fix: ""
+    context: |
+      Generates the SQL that would be executed without applying it.
+      Common issues: migration references a table or column that doesn't
+      exist yet (may depend on another migration or infrastructure step),
+      or uses a database-specific feature not available in the target DB.
+      Check the specific migration file referenced in the error.
+
+  upgrade:
+    command: alembic upgrade head
+    timeout: 120
+    failure_patterns:
+      - pattern: "Target database is not up to date"
+        message: "Database is behind the current head"
+        fix: ""
+      - pattern: "FAILED.*Can't locate revision"
+        message: "Referenced revision does not exist in migration history"
+        fix: ""
+      - pattern: "FAILED.*relation .* already exists"
+        message: "Table or column already exists — migration may have partially run"
+        fix: ""
+      - pattern: "FAILED.*relation .* does not exist"
+        message: "Referenced table does not exist — dependency ordering issue"
+        fix: ""
+    context: |
+      Applies all pending migrations to bring the database to head.
+      Common issues: missing table referenced by a migration (may need
+      infrastructure/Terraform step first), lock contention on the
+      alembic_version table, migration depends on data that doesn't exist.
+      Partial failures are dangerous — check `alembic current` to see
+      where the database actually is, then decide whether to fix forward
+      or stamp back.
+
+  downgrade:
+    command: "alembic downgrade {revision}"
+    timeout: 120
+    failure_patterns:
+      - pattern: "FAILED"
+        message: "Downgrade failed"
+        fix: ""
+    context: |
+      Rolls back migrations to a specific revision. Common issues:
+      downgrade function not implemented (raises NotImplementedError),
+      data exists that violates the older schema constraints, or
+      dependent objects prevent dropping tables/columns.
+
+  history:
+    command: alembic history --verbose
+    timeout: 30
+    context: |
+      Shows the full migration history with revision IDs and descriptions.
+      Useful for understanding the migration graph and finding where
+      branches diverged.

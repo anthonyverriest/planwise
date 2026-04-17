@@ -1,0 +1,83 @@
+name: terraform
+description: Infrastructure as Code provisioning tool
+
+actions:
+  init:
+    command: terraform init
+    success_pattern: "Terraform has been successfully initialized"
+    timeout: 120
+    failure_patterns:
+      - pattern: "Error installing provider"
+        message: "Provider installation failed"
+        fix: "terraform init -upgrade"
+      - pattern: "Failed to query available provider packages"
+        message: "Cannot reach provider registry"
+        fix: ""
+    context: |
+      Initializes the Terraform working directory, downloads providers,
+      and configures the backend. If providers fail to install, check
+      .terraform.lock.hcl for version constraints and network access
+      to registry.terraform.io. The -upgrade flag allows updating
+      providers within version constraints.
+
+  validate:
+    command: terraform validate
+    success_pattern: "Success"
+    timeout: 60
+    failure_patterns:
+      - pattern: "Error:.*"
+        message: "Terraform configuration is invalid"
+        fix: ""
+    context: |
+      Validates the Terraform configuration files for syntax and
+      internal consistency without accessing remote state or providers.
+      Errors here are configuration bugs — check the referenced .tf
+      files and line numbers in the error output.
+
+  plan:
+    command: terraform plan -out=tfplan -detailed-exitcode
+    timeout: 300
+    failure_patterns:
+      - pattern: "Error:.*"
+        message: "Terraform plan failed"
+        fix: ""
+      - pattern: "No changes"
+        message: "No infrastructure changes needed"
+        fix: ""
+    context: |
+      Creates an execution plan showing what Terraform will do.
+      Exit code 0 = no changes, 1 = error, 2 = changes pending.
+      The -detailed-exitcode flag makes exit code 2 mean "changes
+      present" which is expected, not an error. The plan is saved
+      to tfplan for apply. Common errors: state lock held by another
+      process, stale state vs actual infrastructure, missing variables.
+      Check `terraform state list` and the .tf files referenced in errors.
+
+  apply:
+    command: terraform apply tfplan
+    timeout: 600
+    failure_patterns:
+      - pattern: "Error applying plan"
+        message: "Terraform apply failed"
+        fix: ""
+      - pattern: "Error:.*lock"
+        message: "State is locked by another process"
+        fix: ""
+      - pattern: "Error:.*already exists"
+        message: "Resource already exists outside of Terraform"
+        fix: ""
+    context: |
+      Applies the saved plan to create/modify/destroy infrastructure.
+      This is an irreversible operation for destroyed resources.
+      Common issues: state lock from a crashed previous run (check who
+      holds it with `terraform force-unlock` after confirming no other
+      process is running), resource already exists (needs import or
+      manual removal), provider API rate limits or permissions.
+      Check `terraform state list` and cloud provider console.
+
+  output:
+    command: terraform output -json
+    timeout: 30
+    context: |
+      Shows all Terraform outputs as JSON. Useful for getting
+      infrastructure values (endpoints, IDs) that other steps need.

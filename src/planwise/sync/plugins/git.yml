@@ -1,0 +1,98 @@
+name: git
+description: Git operations for branch management and merging
+
+actions:
+  fetch:
+    command: "git fetch {remote}"
+    timeout: 60
+    failure_patterns:
+      - pattern: "fatal: Could not read from remote repository"
+        message: "Cannot reach remote repository"
+        fix: ""
+      - pattern: "fatal: '(.+)' does not appear to be a git repository"
+        message: "Remote is not a valid git repository"
+        fix: ""
+    context: |
+      Git fetch retrieves objects and refs from a remote repository.
+      Common issues: SSH key not loaded, remote URL changed, network issues.
+      Check `git remote -v` and SSH agent status with `ssh-add -l`.
+
+  pull:
+    command: "git pull --rebase {remote} {branch}"
+    timeout: 120
+    failure_patterns:
+      - pattern: "CONFLICT"
+        message: "Rebase conflict detected"
+        fix: ""
+      - pattern: "error: cannot pull with rebase"
+        message: "Uncommitted changes prevent pull"
+        fix: "git stash && git pull --rebase {remote} {branch} && git stash pop"
+    context: |
+      Git pull with rebase replays local commits on top of remote changes.
+      On conflict: the agent should examine conflicting files with `git status`
+      and `git diff`, understand both sides from `git log`, and resolve.
+      If stash pop conflicts after auto-fix, the agent should resolve manually.
+
+  merge:
+    command: "git checkout {to} && git merge {from} --no-edit"
+    success_pattern: "Already up to date|Fast-forward|Merge made"
+    timeout: 120
+    failure_patterns:
+      - pattern: "CONFLICT"
+        message: "Merge conflict detected"
+        fix: ""
+      - pattern: "not something we can merge"
+        message: "Source branch does not exist"
+        fix: "git fetch {remote} && git checkout {to} && git merge {remote}/{from} --no-edit"
+      - pattern: "error: Your local changes"
+        message: "Uncommitted changes would be overwritten"
+        fix: ""
+    context: |
+      Git merge integrates changes from one branch into another.
+      On conflict: the agent should examine the conflicting files,
+      understand both sides of the conflict from git log, and resolve.
+      Check `git status` and `git diff` for conflict markers (<<<< ==== >>>>).
+
+  checkout:
+    command: "git checkout {branch}"
+    success_pattern: "Switched to branch|Already on"
+    timeout: 30
+    failure_patterns:
+      - pattern: "error: Your local changes"
+        message: "Uncommitted changes would be overwritten"
+        fix: "git stash && git checkout {branch} && git stash pop"
+      - pattern: "error: pathspec .* did not match"
+        message: "Branch does not exist"
+        fix: ""
+    context: |
+      Switches to the named branch. If the branch doesn't exist,
+      the agent should check `git branch -a` for remote tracking branches
+      and create a local branch if a remote one exists.
+
+  tag:
+    command: "git tag {tag}"
+    timeout: 30
+    failure_patterns:
+      - pattern: "fatal: tag .* already exists"
+        message: "Tag already exists"
+        fix: ""
+    context: |
+      Creates a lightweight tag at the current HEAD.
+      If the tag exists, the agent should check if it points to the
+      expected commit with `git rev-parse {tag}` vs `git rev-parse HEAD`.
+
+  push:
+    command: "git push {remote} {branch}"
+    timeout: 120
+    failure_patterns:
+      - pattern: "rejected.*non-fast-forward"
+        message: "Push rejected — remote has diverged"
+        fix: ""
+      - pattern: "fatal: Could not read from remote repository"
+        message: "Cannot reach remote repository"
+        fix: ""
+    context: |
+      Pushes local commits to a remote. Non-fast-forward rejections mean
+      the remote has commits not in the local branch. The agent should
+      check `git log --oneline {remote}/{branch}..HEAD` and
+      `git log --oneline HEAD..{remote}/{branch}` to understand the divergence.
