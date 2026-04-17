@@ -39,7 +39,7 @@ Write correct, safe, consistent, maintainable code.
 </approach>
 
 <planning>
-This project uses [Planwise](https://github.com/averriest/planwise), a local file-based issue
+This project uses [Planwise](https://github.com/anthonyverriest/planwise), a local file-based issue
 tracker for structured planning. Issues are stored as markdown files with YAML frontmatter in
 `planwise/issues/`. Use `pw` subcommands to manage issues as directed by workflows.
 </planning>

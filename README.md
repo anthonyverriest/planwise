@@ -16,9 +16,23 @@ bug (captured anytime, independent flow)
 
 ## Install
 
+Planwise ships a CLI (`pw` / `planwise`), so an isolated tool install is recommended.
+
+**With uv (recommended):**
+
 ```bash
-uv pip install planwise
+uv tool install git+https://github.com/anthonyverriest/planwise
 ```
+
+**With pip / pipx:**
+
+```bash
+pipx install git+https://github.com/anthonyverriest/planwise
+# or, into the current environment:
+pip install git+https://github.com/anthonyverriest/planwise
+```
+
+Upgrade later with `uv tool upgrade planwise` or `pipx upgrade planwise`.
 
 ## Quick start
 
@@ -74,7 +88,7 @@ You (in Claude Code)          Claude Code                    pw CLI
 
 | Command | When |
 |---------|------|
-| `uv pip install planwise` | Once, to install |
+| `uv tool install git+https://github.com/anthonyverriest/planwise` | Once, to install |
 | `pw init --project "name" --prefix "XX" --agent claude` | Once per project, to set up |
 | `pw verify [--fix]` | Anytime, to check data integrity |
 | `pw stats` | Anytime, to see project status |
