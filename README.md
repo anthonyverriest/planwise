@@ -40,10 +40,10 @@ In your terminal:
 
 ```bash
 cd your-project
-pw init --project "myapp" --prefix "MA" --agent claude --rules python
+pw init --project "myapp" --prefix "MA" --agent claude --rules python --layout python-web
 ```
 
-This creates a `planwise/` directory, injects planwise instructions into `CLAUDE.md`, and configures the Python ruleset. Claude Code reads those instructions automatically, so it knows how to use `pw` commands when you ask it to plan, implement, or test a feature.
+This creates a `planwise/` directory, injects planwise instructions into `CLAUDE.md`, configures the Python ruleset, and seeds a project-specific package-layout section. Claude Code reads those instructions automatically, so it knows how to use `pw` commands when you ask it to plan, implement, or test a feature.
 
 ```bash
 # Or without agent integration — just the planning directory
@@ -89,7 +89,7 @@ You (in Claude Code)          Claude Code                    pw CLI
 | Command | When |
 |---------|------|
 | `uv tool install git+https://github.com/anthonyverriest/planwise` | Once, to install |
-| `pw init --project "name" --prefix "XX" --agent claude` | Once per project, to set up |
+| `pw init --project "name" --prefix "XX" --agent claude --layout python-web` | Once per project, to set up |
 | `pw verify [--fix]` | Anytime, to check data integrity |
 | `pw stats` | Anytime, to see project status |
 
@@ -190,6 +190,28 @@ Planwise ships with built-in rulesets. The `$RULES` marker in workflow templates
 | `finance` | Financial engineering (idempotency, precision, distributed consistency) |
 | `ui-ux` | UI/UX design guidelines (layout, typography, color, forms) |
 
+## Layouts
+
+Layouts are project-shape scaffolds — the package/directory structure for a given project type — seeded as a standalone file and referenced from `CLAUDE.md` via a one-line `@` import. Unlike rulesets (which carry coding behavior and are runtime-injected into workflow templates), layouts only describe *where code lives*. The layout file is written once and owned by you: edit `planwise/layout.md` freely, and re-running `pw init --layout X` will skip rather than overwrite.
+
+Layouts complement rulesets. Rulesets cover coding behavior (idioms, forbidden libs, framework conventions) scoped to coding workflows. Layouts give the agent always-on structural orientation (which directory holds the domain logic, where adapters live, etc.) without polluting planning workflows or general chat with code rules.
+
+Seeding writes two things:
+
+- `planwise/layout.md` — the layout content (a filesystem tree wrapped in `<layout>...</layout>`), yours to edit.
+- `@planwise/layout.md` line appended to `CLAUDE.md` — Claude Code resolves the import automatically. Idempotent: re-runs only add the line if missing.
+
+Set at init (or add later):
+
+```bash
+pw init --project "myapp" --prefix "MA" --agent claude --layout python-web
+pw init --layout python-web              # seed a layout into an existing project
+```
+
+| Layout | Scope |
+|--------|-------|
+| `python-web` | Python web API (hexagonal: `domain/`, `adapters/`, `api/`, `core/`) |
+
 ## Storage
 
 - Each project gets a `planwise/` directory with markdown files organized by status
@@ -212,7 +234,7 @@ No manual worktree setup needed. The workflow detects whether it's running in a 
 
 | Command | Description |
 |---------|-------------|
-| `init --project "name" --prefix "XX" [--agent claude] [--rules python]` | Initialize planning (re-run with `--agent`/`--rules` to update) |
+| `init --project "name" --prefix "XX" [--agent claude] [--rules python] [--layout python-web]` | Initialize planning (re-run with `--agent`/`--rules`/`--layout` to update) |
 | `create <feature\|sub-feature\|task\|uat\|bug> "title"` | Create an issue (body from stdin) |
 | `view <slug>` | View an issue |
 | `edit <slug> --title/--body/--label/--agent` | Edit an issue |

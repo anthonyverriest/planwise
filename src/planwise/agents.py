@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 
 from planwise.frontmatter import parse
+from planwise.layouts import read_layout
 from planwise.workflows import list_workflows, read_workflow
 
 VALID_AGENTS = ("claude",)
@@ -58,6 +59,9 @@ tracker for structured planning. Issues are stored as markdown files with YAML f
 AGENT_CONFIG: dict[str, str] = {
     "claude": "CLAUDE.md",
 }
+
+LAYOUT_FILE_RELPATH = "planwise/layout.md"
+LAYOUT_IMPORT_LINE = f"@{LAYOUT_FILE_RELPATH}"
 
 
 def _extract_description(workflow_content: str) -> str:
@@ -168,3 +172,31 @@ def inject_agent_instructions(agent: str, project_dir: Path) -> tuple[Path, bool
 
     target.write_text(CODING_STANDARDS, encoding="utf-8")
     return target, False
+
+
+def inject_layout_section(layout_name: str, project_dir: Path) -> tuple[Path, bool]:
+    """Seed layout into planwise/layout.md and reference it from CLAUDE.md via @import.
+
+    Returns (layout_file_path, skipped). Skipped=True when planwise/layout.md
+    already exists — never overwrites user edits. The @import line in CLAUDE.md
+    is added if missing (self-healing) regardless of skip state.
+    """
+    layout_file = project_dir / LAYOUT_FILE_RELPATH
+    claude_md = project_dir / AGENT_CONFIG["claude"]
+
+    skipped = layout_file.exists()
+    if not skipped:
+        layout_content = read_layout(layout_name)
+        assert layout_content is not None, f"layout '{layout_name}' validated but missing"
+        layout_file.parent.mkdir(parents=True, exist_ok=True)
+        layout_file.write_text(layout_content, encoding="utf-8")
+
+    claude_content = claude_md.read_text(encoding="utf-8") if claude_md.exists() else ""
+    if LAYOUT_IMPORT_LINE not in claude_content:
+        separator = "" if not claude_content or claude_content.endswith("\n") else "\n"
+        claude_md.write_text(
+            claude_content + separator + LAYOUT_IMPORT_LINE + "\n",
+            encoding="utf-8",
+        )
+
+    return layout_file, skipped

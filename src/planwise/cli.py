@@ -10,10 +10,11 @@ import click
 
 from planwise import __version__
 from planwise.agents import VALID_AGENTS as VALID_AGENT_NAMES
-from planwise.agents import inject_agent_instructions
+from planwise.agents import inject_agent_instructions, inject_layout_section
 from planwise.commands import completion, crud, deps, lifecycle, metadata, query, run, sync, verify
 from planwise.frontmatter import parse, to_issue
 from planwise.helpers import STATUS_DIR_NAMES, VALID_STATUSES, echo_json, is_text
+from planwise.layouts import validate_layout_callback
 from planwise.rulesets import parse_rules_callback
 from planwise.store import MetaStore, get_planning_dir
 
@@ -28,6 +29,31 @@ def _update_config_rules(planning_dir: Path, rules: tuple[str, ...]) -> None:
     merged = sorted(set(existing) | set(rules))
     config["rules"] = merged
     config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+
+
+def _update_config_layout(planning_dir: Path, layout: str) -> None:
+    """Persist the selected layout name into config.json."""
+    config_path = planning_dir / "config.json"
+    config: dict = {}
+    if config_path.exists():
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["layout"] = layout
+    config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+
+
+def _seed_layout(layout: str, project_dir: Path) -> tuple[Path, bool]:
+    """Seed layout into planwise/layout.md and reference it from CLAUDE.md.
+
+    Warns via stderr if the layout file already exists (user edits preserved).
+    """
+    path, skipped = inject_layout_section(layout, project_dir)
+    if skipped:
+        click.echo(
+            f"Layout file already present at {path}; skipping "
+            "(edit it directly, or delete to re-seed).",
+            err=True,
+        )
+    return path, skipped
 
 
 @click.group()
@@ -59,6 +85,13 @@ def cli(ctx: click.Context, text: bool) -> None:
     expose_value=True,
     help="Ruleset to inject into coding workflows (comma-separated or repeatable).",
 )
+@click.option(
+    "--layout",
+    "layout",
+    default=None,
+    callback=validate_layout_callback,
+    help="Package-layout preset to seed into the project's CLAUDE.md (one-time, user-owned after).",
+)
 @click.pass_context
 def init(
     ctx: click.Context,
@@ -66,16 +99,19 @@ def init(
     prefix: str | None,
     agent: str | None,
     rules: tuple[str, ...],
+    layout: str | None,
 ) -> None:
     """Initialize a new planning directory."""
     planning_dir = get_planning_dir()
     already_exists = planning_dir.is_dir()
 
-    if already_exists and not agent and not rules:
+    if already_exists and not agent and not rules and not layout:
         raise click.UsageError(f"Planning directory already exists: {planning_dir}")
     if already_exists:
         if rules:
             _update_config_rules(planning_dir, rules)
+        if layout:
+            _update_config_layout(planning_dir, layout)
         if agent:
             agent_path, updated = inject_agent_instructions(agent, planning_dir.parent)
             action = "Updated" if updated else "Injected"
@@ -83,10 +119,19 @@ def init(
                 click.echo(f"{action} planwise instructions in {agent_path}")
             else:
                 echo_json({"agent_config": str(agent_path), "updated": updated})
-        elif rules and is_text(ctx):
-            click.echo(f"Updated rules: {', '.join(rules)}")
-        elif rules:
-            echo_json({"rules": list(rules)})
+        if layout:
+            layout_path, skipped = _seed_layout(layout, planning_dir.parent)
+            if is_text(ctx) and not skipped:
+                click.echo(f"Seeded '{layout}' layout into {layout_path}")
+            elif not is_text(ctx):
+                echo_json(
+                    {"layout": layout, "layout_path": str(layout_path), "skipped": skipped}
+                )
+        if rules and not agent and not layout:
+            if is_text(ctx):
+                click.echo(f"Updated rules: {', '.join(rules)}")
+            else:
+                echo_json({"rules": list(rules)})
         return
 
     if not project or not prefix:
@@ -109,6 +154,8 @@ def init(
         config["agent"] = agent
     if rules:
         config["rules"] = sorted(set(rules))
+    if layout:
+        config["layout"] = layout
     (planning_dir / "config.json").write_text(
         json.dumps(config, indent=2) + "\n",
         encoding="utf-8",
@@ -119,6 +166,10 @@ def init(
     if agent:
         agent_path, _updated = inject_agent_instructions(agent, planning_dir.parent)
 
+    layout_path = None
+    if layout:
+        layout_path, _skipped = _seed_layout(layout, planning_dir.parent)
+
     if is_text(ctx):
         click.echo(
             f"Initialized planwise for project '{project}' (prefix: {prefix}) in {planning_dir}"
@@ -127,6 +178,8 @@ def init(
             click.echo(f"Rules: {', '.join(rules)}")
         if agent_path:
             click.echo(f"Injected planwise instructions into {agent_path}")
+        if layout_path:
+            click.echo(f"Seeded '{layout}' layout into {layout_path}")
         click.echo("Run 'planwise completion install' to enable tab completion.")
     else:
         result: dict = {"project": project, "prefix": prefix, "path": str(planning_dir)}
@@ -134,6 +187,10 @@ def init(
             result["rules"] = sorted(set(rules))
         if agent_path:
             result["agent_config"] = str(agent_path)
+        if layout:
+            result["layout"] = layout
+        if layout_path:
+            result["layout_path"] = str(layout_path)
         echo_json(result)
 
 
