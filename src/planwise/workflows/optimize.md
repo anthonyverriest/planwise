@@ -39,6 +39,7 @@ Each dimension is a **lens** — a distinct expert mindset for finding issues. T
 - Dead code (unreachable branches, unused imports/variables/functions, stale feature flags)
 - Magic numbers and hardcoded strings scattered through logic
 - Naming inconsistencies (same concept under different names; names that don't match behavior)
+- Pattern inconsistencies (same operation implemented differently across call sites — the outlier is usually the drift; align to the majority pattern unless the majority is wrong)
 - Convention violations relative to surrounding code or project rules
 
 **Out of scope for this lens:**

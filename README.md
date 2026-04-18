@@ -67,6 +67,38 @@ Then, inside Claude Code, just ask:
 
 Both accept free text or an existing issue slug. When given a slug, the workflow reads the issue as starting context — so you can toss rough ideas into the backlog and flesh them out later.
 
+### Advancing between phases — `/next`
+
+Each workflow is already a standalone skill (`/plan`, `/brief`, `/implement`, etc.). To chain them without typing the next phase manually, use `/next`. It reads the pipeline state, figures out what comes next, and prints the expanded workflow into your conversation:
+
+```
+> /plan add oauth
+> (iterate on the plan, feature issue gets created)
+> /clear                       ← drops prior context; built-in Claude Code command
+> /next                        ← loads /implement <slug> into the fresh window
+> (iterate on implementation)
+> /clear
+> /next                        ← loads /test <slug>
+> ...
+```
+
+Chains: `brief → task` for small features, `plan → implement → test → optimize → memo` for larger ones. `/next` on the last phase of either chain reports completion and clears the pipeline state. The slug of the feature/task issue created during `/plan` or `/brief` is auto-detected and threaded through.
+
+If you ran several `/plan` or `/brief` (or a mix) before typing `/next`, the pipeline session tracks every issue created. `/next` alone will list the candidates:
+
+```
+Multiple issues created during this planning session:
+  [feature] auth-oauth
+  [feature] auth-saml
+  [task]    fix-header
+
+Re-run as: /next <slug>  to pick one.
+```
+
+`/next auth-oauth` picks that feature and routes to `/implement`; `/next fix-header` picks the task and routes to `/task`.
+
+The `/clear` is what gives each phase a fresh context window; pipeline state lives on disk (`planwise/.pipeline-state.json`), so `/clear` doesn't break the chain.
+
 ## How it works
 
 ```
@@ -192,14 +224,11 @@ Planwise ships with built-in rulesets. The `$RULES` marker in workflow templates
 
 ## Layouts
 
-Layouts are project-shape scaffolds — the package/directory structure for a given project type — seeded as a standalone file and referenced from `CLAUDE.md` via a one-line `@` import. Unlike rulesets (which carry coding behavior and are runtime-injected into workflow templates), layouts only describe *where code lives*. The layout file is written once and owned by you: edit `planwise/layout.md` freely, and re-running `pw init --layout X` will skip rather than overwrite.
+Layouts are project-shape scaffolds — the package/directory structure for a given project type — appended directly to `CLAUDE.md` as a `<layout>...</layout>` section. Unlike rulesets (which carry coding behavior and are runtime-injected into workflow templates), layouts only describe *where code lives*. Once seeded, the section is yours to edit: re-running `pw init --layout X` skips when a `<layout>` block is already present, so your changes are never overwritten.
 
 Layouts complement rulesets. Rulesets cover coding behavior (idioms, forbidden libs, framework conventions) scoped to coding workflows. Layouts give the agent always-on structural orientation (which directory holds the domain logic, where adapters live, etc.) without polluting planning workflows or general chat with code rules.
 
-Seeding writes two things:
-
-- `planwise/layout.md` — the layout content (a filesystem tree wrapped in `<layout>...</layout>`), yours to edit.
-- `@planwise/layout.md` line appended to `CLAUDE.md` — Claude Code resolves the import automatically. Idempotent: re-runs only add the line if missing.
+Seeding is a single write: the layout content is appended to `CLAUDE.md` inside a `<layout>...</layout>` block. If `CLAUDE.md` is missing or lacks the planwise coding-standards block, it's seeded too — so `--layout` alone produces a complete, standalone `CLAUDE.md`.
 
 Set at init (or add later):
 

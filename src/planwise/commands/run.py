@@ -5,47 +5,9 @@ from __future__ import annotations
 import click
 
 from planwise.helpers import echo_json, is_text
-from planwise.rulesets import parse_rules_callback, read_ruleset
+from planwise.rulesets import parse_rules_callback
 from planwise.store import get_store
-from planwise.workflows import list_workflows, read_workflow
-
-RULES_MARKER = "$RULES"
-TEST_RULES_MARKER = "$TESTRULES"
-RULE_MARKERS: dict[str, str] = {
-    RULES_MARKER: "base",
-    TEST_RULES_MARKER: "test-base",
-}
-
-
-def _expand_marker(base_name: str, project_names: list[str]) -> str:
-    """Build a marker's replacement: base ruleset followed by project rulesets."""
-    sections: list[str] = []
-    base = read_ruleset(base_name)
-    if base is not None:
-        sections.append(base.strip())
-
-    for name in project_names:
-        if name == base_name:
-            continue
-        ruleset = read_ruleset(name)
-        if ruleset is not None:
-            sections.append(ruleset.strip())
-
-    return "\n\n".join(sections) if sections else ""
-
-
-def _replace_rules(ctx: click.Context, content: str, overrides: tuple[str, ...]) -> str:
-    """Replace each rule marker with its base + project/override ruleset content."""
-    if not any(marker in content for marker in RULE_MARKERS):
-        return content
-
-    names: list[str] = list(overrides) if overrides else get_store(ctx).get_config("rules", [])
-    for marker, base_name in RULE_MARKERS.items():
-        if marker not in content:
-            continue
-        replacement = _expand_marker(base_name, names) if names else ""
-        content = content.replace(marker, replacement)
-    return content
+from planwise.workflows import expand_workflow, list_workflows
 
 
 WORKFLOW_EPILOGUE = """\
@@ -108,16 +70,16 @@ def run(
         )
 
     workflow = workflow.removesuffix(".md")
-    content = read_workflow(workflow)
+    arguments = " ".join(arg.removesuffix(".md") for arg in args)
+    rule_names = list(rules) if rules else list(get_store(ctx).get_config("rules", []))
+
+    content = expand_workflow(workflow, arguments, rule_names)
     if content is None:
         available = ", ".join(list_workflows())
         raise click.UsageError(
             f"Unknown workflow '{workflow}'. Available: {available}"
         )
 
-    arguments = " ".join(arg.removesuffix(".md") for arg in args)
-    content = content.replace("$ARGUMENTS", arguments)
-    content = _replace_rules(ctx, content, rules)
     content = content.rstrip() + "\n\n" + WORKFLOW_EPILOGUE
 
     if is_text(ctx):

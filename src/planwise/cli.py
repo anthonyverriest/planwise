@@ -11,7 +11,18 @@ import click
 from planwise import __version__
 from planwise.agents import VALID_AGENTS as VALID_AGENT_NAMES
 from planwise.agents import inject_agent_instructions, inject_layout_section
-from planwise.commands import completion, crud, deps, lifecycle, metadata, query, run, sync, verify
+from planwise.commands import (
+    completion,
+    crud,
+    deps,
+    lifecycle,
+    metadata,
+    pipeline,
+    query,
+    run,
+    sync,
+    verify,
+)
 from planwise.frontmatter import parse, to_issue
 from planwise.helpers import STATUS_DIR_NAMES, VALID_STATUSES, echo_json, is_text
 from planwise.layouts import validate_layout_callback
@@ -42,15 +53,15 @@ def _update_config_layout(planning_dir: Path, layout: str) -> None:
 
 
 def _seed_layout(layout: str, project_dir: Path) -> tuple[Path, bool]:
-    """Seed layout into planwise/layout.md and reference it from CLAUDE.md.
+    """Append the layout section to CLAUDE.md.
 
-    Warns via stderr if the layout file already exists (user edits preserved).
+    Warns via stderr if the <layout> section is already present (user edits preserved).
     """
     path, skipped = inject_layout_section(layout, project_dir)
     if skipped:
         click.echo(
-            f"Layout file already present at {path}; skipping "
-            "(edit it directly, or delete to re-seed).",
+            f"Layout already present in {path}; skipping "
+            "(edit the <layout> section directly, or delete it to re-seed).",
             err=True,
         )
     return path, skipped
@@ -120,6 +131,8 @@ def init(
             else:
                 echo_json({"agent_config": str(agent_path), "updated": updated})
         if layout:
+            if not agent:
+                inject_agent_instructions("claude", planning_dir.parent)
             layout_path, skipped = _seed_layout(layout, planning_dir.parent)
             if is_text(ctx) and not skipped:
                 click.echo(f"Seeded '{layout}' layout into {layout_path}")
@@ -168,6 +181,8 @@ def init(
 
     layout_path = None
     if layout:
+        if not agent:
+            inject_agent_instructions("claude", planning_dir.parent)
         layout_path, _skipped = _seed_layout(layout, planning_dir.parent)
 
     if is_text(ctx):
@@ -244,5 +259,6 @@ query.register(cli)
 deps.register(cli)
 metadata.register(cli)
 run.register(cli)
+pipeline.register(cli)
 sync.register(cli)
 verify.register(cli)

@@ -18,7 +18,18 @@ name: {name}
 description: "{description}"
 ---
 
+!`pw pipeline-enter {name} $ARGUMENTS`
+
 !`pw -t run {name} $ARGUMENTS`
+"""
+
+NEXT_SKILL_TEMPLATE = """\
+---
+name: next
+description: "Advance to the next phase in the active Planwise pipeline. Run /clear first for fresh context. Pass a slug to pick when multiple candidates exist."
+---
+
+!`pw -t pipeline-next $ARGUMENTS`
 """
 
 CODING_STANDARDS = """\
@@ -60,8 +71,8 @@ AGENT_CONFIG: dict[str, str] = {
     "claude": "CLAUDE.md",
 }
 
-LAYOUT_FILE_RELPATH = "planwise/layout.md"
-LAYOUT_IMPORT_LINE = f"@{LAYOUT_FILE_RELPATH}"
+LAYOUT_MARKER = "<layout>"
+OUTPUT_MARKER = "<output>"
 
 
 def _extract_description(workflow_content: str) -> str:
@@ -71,7 +82,7 @@ def _extract_description(workflow_content: str) -> str:
 
 
 def generate_claude_skills(project_dir: Path) -> list[Path]:
-    """Generate .claude/skills/<workflow>/SKILL.md for each workflow.
+    """Generate .claude/skills/<workflow>/SKILL.md for each workflow plus /next.
 
     Returns list of created skill directories.
     """
@@ -93,6 +104,11 @@ def generate_claude_skills(project_dir: Path) -> list[Path]:
         )
         created.append(skill_dir)
 
+    next_dir = skills_dir / "next"
+    next_dir.mkdir(parents=True, exist_ok=True)
+    (next_dir / "SKILL.md").write_text(NEXT_SKILL_TEMPLATE, encoding="utf-8")
+    created.append(next_dir)
+
     return created
 
 
@@ -106,7 +122,7 @@ def remove_claude_skills(project_dir: Path) -> int:
         return 0
 
     removed = 0
-    for name in list_workflows():
+    for name in [*list_workflows(), "next"]:
         skill_dir = skills_dir / name
         if skill_dir.is_dir():
             shutil.rmtree(skill_dir)
@@ -175,28 +191,33 @@ def inject_agent_instructions(agent: str, project_dir: Path) -> tuple[Path, bool
 
 
 def inject_layout_section(layout_name: str, project_dir: Path) -> tuple[Path, bool]:
-    """Seed layout into planwise/layout.md and reference it from CLAUDE.md via @import.
+    """Insert layout content into CLAUDE.md, before the <output> block.
 
-    Returns (layout_file_path, skipped). Skipped=True when planwise/layout.md
-    already exists — never overwrites user edits. The @import line in CLAUDE.md
-    is added if missing (self-healing) regardless of skip state.
+    Returns (claude_md_path, skipped). Skipped=True when the <layout> tag is
+    already present in CLAUDE.md — never overwrites user edits. Falls back to
+    appending at end when CLAUDE.md has no <output> block.
     """
-    layout_file = project_dir / LAYOUT_FILE_RELPATH
     claude_md = project_dir / AGENT_CONFIG["claude"]
-
-    skipped = layout_file.exists()
-    if not skipped:
-        layout_content = read_layout(layout_name)
-        assert layout_content is not None, f"layout '{layout_name}' validated but missing"
-        layout_file.parent.mkdir(parents=True, exist_ok=True)
-        layout_file.write_text(layout_content, encoding="utf-8")
-
     claude_content = claude_md.read_text(encoding="utf-8") if claude_md.exists() else ""
-    if LAYOUT_IMPORT_LINE not in claude_content:
-        separator = "" if not claude_content or claude_content.endswith("\n") else "\n"
-        claude_md.write_text(
-            claude_content + separator + LAYOUT_IMPORT_LINE + "\n",
-            encoding="utf-8",
-        )
 
-    return layout_file, skipped
+    if LAYOUT_MARKER in claude_content:
+        return claude_md, True
+
+    layout_content = read_layout(layout_name)
+    assert layout_content is not None, f"layout '{layout_name}' validated but missing"
+
+    layout_block = layout_content if layout_content.endswith("\n") else layout_content + "\n"
+
+    if OUTPUT_MARKER in claude_content:
+        head, _, tail = claude_content.partition(OUTPUT_MARKER)
+        if not head.endswith("\n\n"):
+            head = head.rstrip("\n") + "\n\n"
+        new_content = head + layout_block + "\n" + OUTPUT_MARKER + tail
+    else:
+        separator = "" if not claude_content else ("\n" if claude_content.endswith("\n") else "\n\n")
+        new_content = claude_content + separator + layout_block
+
+    claude_md.parent.mkdir(parents=True, exist_ok=True)
+    claude_md.write_text(new_content, encoding="utf-8")
+
+    return claude_md, False
