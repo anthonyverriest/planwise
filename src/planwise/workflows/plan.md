@@ -375,4 +375,5 @@ User testing:
   3. <N> — [UAT] <title>
 
 Next:  /next  (or /next <slug> if multiple issues were created)
+Tip: /clear or /compact first if context is heavy.
 ```

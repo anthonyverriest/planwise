@@ -186,4 +186,5 @@ Task: <task-slug> — <title>
 Scope: [N] files
 
 Next:  /next  (or /next <slug> if multiple tasks were created)
+Tip: /clear or /compact first if context is heavy.
 ```

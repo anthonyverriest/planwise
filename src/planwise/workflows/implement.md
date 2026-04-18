@@ -279,4 +279,5 @@ Next steps:
 4. When all tests pass, close the UAT and feature, then tell me to create the PR
 
 Next:  /next
+Tip: /clear or /compact first if context is heavy.
 ```

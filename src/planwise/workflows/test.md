@@ -413,4 +413,5 @@ Dimensions skipped: [list with reason, or "None"]
 typecheck: P/F | lint: P/F | test: P/F
 
 Next:  /next
+Tip: /clear or /compact first if context is heavy.
 ```

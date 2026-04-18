@@ -409,4 +409,5 @@ typecheck: P/F | lint: P/F | test: P/F
 To undo all optimize changes: `git reset --hard optimize-baseline && git tag -d optimize-baseline`
 
 Next:  /next
+Tip: /clear or /compact first if context is heavy.
 ```

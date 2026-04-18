@@ -230,4 +230,5 @@ Failing test: @<test-path>
 Status: ready
 
 Next:  /next  (or /next <slug> if multiple bugs were created)
+Tip: /clear or /compact first if context is heavy.
 ```
