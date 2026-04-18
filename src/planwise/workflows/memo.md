@@ -61,29 +61,29 @@ Record:
 - Bug sub-features: what broke, root cause, fix approach
 - UAT: what was tested, what passed/failed
 
-### Step 2: Read git history for the feature branch
+### Step 2: Read jj history for the feature change
 
-Identify the feature branch from the feature or git:
+Identify the feature bookmark and walk the change graph from `dev@origin`:
 ```bash
-git branch --list 'feat/*' 'fix/*'
-git log dev..HEAD --oneline --stat
+jj bookmark list --all-remotes | grep -E '^(feat|fix)/'
+jj log -r 'dev@origin..@' -T builtin_log_oneline --stat
 ```
 
-If the branch has been merged, find the merge and walk the branch history:
+If the bookmark has already been merged into `dev`, walk the ancestry from a merge change instead:
 ```bash
-git log --oneline --stat --merges --grep="$ARGUMENTS" dev
+jj log -r 'description(glob:"*'"$ARGUMENTS"'*") & ::dev@origin & merges()' -T builtin_log_oneline --stat
 ```
 
 Extract:
-- Commit messages (encode decisions)
-- Reverts (encode gotchas)
+- Commit descriptions (encode decisions)
+- Abandoned or reverted changes (encode gotchas — surface via `jj op log` if needed)
 - Optimize commits (prefixed `optimize:`) — what was fixed/evolved post-implementation
 
 ### Step 3: Read optimize and test artifacts
 
 ```bash
-git log dev..HEAD --oneline --grep="optimize:"
-git log dev..HEAD --oneline --grep="test:"
+jj log -r 'description(glob:"optimize:*") & dev@origin..@' -T builtin_log_oneline
+jj log -r 'description(glob:"test:*") & dev@origin..@' -T builtin_log_oneline
 ```
 
 Check sub-feature notes for optimize/test reports:
@@ -95,6 +95,41 @@ Record:
 - Optimize verdict (converged/stuck/stopped), iteration count, what was fixed vs remaining
 - Test findings: bugs found, crashes, what held up
 - Dimensions that scored well vs poorly
+
+### Step 3b: Mine the jj operation log for discarded work
+
+**This is pure knowledge-base signal that git cannot provide.** jj's operation log preserves every repo mutation — including changes that were abandoned, rewritten, or reverted during implementation. These are exactly where gotchas live: approaches that were tried and didn't work.
+
+List recent operations with their descriptions:
+
+```bash
+jj op log --limit 200 --no-graph -T 'id.short() ++ " " ++ description ++ "\n"'
+```
+
+Inspect each operation's effect on the repo — the `--patch` flag shows the diff introduced or reverted by each op, without mutating state:
+
+```bash
+jj op log --limit 200 --patch
+```
+
+Look specifically for operations relevant to this feature's timeline:
+- `abandon` operations — a change was thrown away. The op's patch shows what was discarded.
+- `rewrite` / `squash` / `rebase` operations — indicate a merge or amend; conflict markers in the patch indicate manual resolution was needed.
+- `restore` operations — indicate a rollback (e.g., from `/optimize` baseline).
+- Multiple ops on the same change-id — signal rework; read the change's final state plus the intermediate ops.
+
+For any abandoned change whose content you need to read in full, jj still indexes it by change-id until garbage collection:
+
+```bash
+jj show <abandoned-change-id>       # succeeds while the change is in the op-log and not yet gc'd
+```
+
+Do **not** use `jj op restore` as a preview mechanism — it mutates repo state. `jj op log --patch` is the read-only path.
+
+Record:
+- **Abandoned approaches** — what was tried, why it was thrown away → feeds *Gotchas* ("approach X fails because Y, prefer Z")
+- **Conflict hotspots** — files that triggered merge conflicts during sub-feature integration → feeds *Gotchas* and *Constraints* ("changes to <file> must consider <invariant>")
+- **Rework patterns** — sub-features that required >1 commit cycle → feeds *Decisions* (the final approach, with rejected alternatives)
 
 ### Step 4: Identify target domain(s) and read existing knowledge
 

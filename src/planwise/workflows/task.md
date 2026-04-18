@@ -34,7 +34,7 @@ $RULES
 
 ## Step 2: Implement
 
-Work on the current branch. Read each file immediately before editing. Follow the rules above. Respect the spec's Constraints section — these are regressions that must not happen.
+Work on the current jj change. Read each file immediately before editing. Follow the rules above. Respect the spec's Constraints section — these are regressions that must not happen.
 
 No scope creep — only modify files listed in the Scope section. If you believe an unlisted file needs changing, STOP and report to the user — do not modify it yourself.
 
@@ -102,9 +102,10 @@ Before committing, re-read the spec's Acceptance Criteria. Verify each criterion
 ## Step 4: Commit
 
 ```bash
-git add -A
-git commit -m "<type>: <description> (#$ARGUMENTS)"
+jj commit -m "<type>: <description> (#$ARGUMENTS)"
 ```
+
+jj auto-snapshots the working copy — no staging. `jj commit` closes the current change and starts a new empty one on top.
 
 Commit types: feat, fix, ref, test, docs, chore, style. Use imperative mood, focus on outcomes.
 
@@ -152,13 +153,12 @@ If issues are found: fix them. After fixing, self-verify — re-read your diff a
 
 If any answer is no, revise before proceeding.
 
-Re-run checks. If checks pass, commit separately:
+Re-run checks. If checks pass, commit separately — pass explicit paths so unrelated working-copy edits stay out of this commit:
 ```bash
-git add <modified-files>
-git commit -m "optimize: <what was improved> (#$ARGUMENTS)"
+jj commit <modified-files> -m "optimize: <what was improved> (#$ARGUMENTS)"
 ```
 
-If checks fail after an optimize fix, revert the change (`git checkout -- <files>`) and move on. Do not loop.
+If checks fail after an optimize fix, revert the change (`jj restore <files>`) and move on. Do not loop.
 
 If no issues are found or all are trivial: skip. Do not optimize for the sake of optimizing.
 
@@ -204,7 +204,7 @@ If the domain file's summary, tags, or entry titles changed, update the correspo
 
 If no updates needed, skip.
 
-## Step 8: Close and report
+## Step 7: Close and report
 
 ```bash
 planwise status $ARGUMENTS done
@@ -224,5 +224,5 @@ Checks: typecheck P/F | lint P/F | test P/F
 
 Retrospective: [one sentence — what assumption was wrong or what you'd do differently, or "smooth — no surprises"]
 
-Branch: <current branch>
+Bookmark: <current bookmark> (jj change id: <current change id>)
 ```

@@ -13,15 +13,44 @@ from planwise.workflows import expand_workflow, list_workflows
 WORKFLOW_EPILOGUE = """\
 ## Final commit
 
-After completing all steps, commit any remaining changes (including issue status moves):
+If another parallel workspace may have rewritten a change this workspace touched,
+reconcile first (no-op if nothing is stale):
 
 ```bash
-git add -A
-git commit -m "<type>: <describe what changed>"
-# Commit types: feat, fix, ref, test, docs, chore, style
-git pull --rebase origin dev
-git push
+jj workspace update-stale
 ```
+
+After completing all steps, commit any remaining changes (including issue status moves),
+rebase onto the latest `dev`, and push the current bookmark:
+
+```bash
+jj commit -m "<type>: <describe what changed>"
+# Commit types: feat, fix, ref, test, docs, chore, style
+jj git fetch
+jj rebase -d dev@origin
+```
+
+**Check for rebase conflicts** — unlike git, jj records conflicts inline as first-class data
+in the rebased changes rather than aborting:
+
+```bash
+jj resolve --list
+```
+
+If conflicted paths are reported, resolve them inline before pushing:
+
+1. Read each conflicted file — jj has materialized `<<<<<<<` / `|||||||` / `=======` / `>>>>>>>` markers.
+2. Edit the file to produce a coherent unified result. The working copy is auto-snapshotted.
+3. Confirm `jj resolve --list` reports no remaining conflicts.
+
+Then push:
+
+```bash
+jj git push
+```
+
+jj auto-snapshots the working copy — no staging area. The colocated git repo stays in sync,
+so CI and the remote see conventional git commits.
 """
 
 

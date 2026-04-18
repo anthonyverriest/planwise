@@ -8,17 +8,18 @@ Implement all coding sub-features for an feature following its dependency graph.
 
 ## Target: Feature $ARGUMENTS
 
-## Worktree detection
+## Workspace detection
 
-Before starting, detect whether you are running inside a git worktree:
+Before starting, detect whether you are running inside a non-default jj workspace:
 
 ```bash
-git rev-parse --absolute-git-dir
+jj workspace list
 ```
 
-If the output contains `/worktrees/`, you are in a **worktree session** — another feature is being implemented in the main working tree. This is expected during parallel multi-feature execution. In worktree mode:
-- You are already on the correct feature branch — skip branch creation (Step 2).
+If the active workspace (shown by `jj workspace list` with `@` marker, or inferred from the current directory relative to workspace roots) is not `default`, you are in a **workspace session** — another feature is being implemented in the default workspace. This is expected during parallel multi-feature execution. In workspace mode:
+- You are already on the correct feature change — skip bookmark creation (Step 2).
 - Other features may be `in-progress` concurrently — this is normal, not a conflict.
+- If your working copy appears stale (another workspace rewrote a shared change), run `jj workspace update-stale`.
 
 ## Process
 
@@ -36,7 +37,7 @@ If status is `in-progress`, STOP: `Feature $ARGUMENTS is already being implement
 
 Other features being `in-progress` is expected during parallel execution — only check **this** feature.
 
-Understand the full scope, the WHAT and WHY. Note the feature title — you will derive the branch name from it.
+Understand the full scope, the WHAT and WHY. Note the feature title — you will derive the bookmark name from it.
 
 Move the feature to **in-progress**:
 
@@ -44,29 +45,32 @@ Move the feature to **in-progress**:
 planwise status $ARGUMENTS in-progress
 ```
 
-### Step 2: Create or switch to the feature branch
+### Step 2: Create or switch to the feature change
 
-**If in a worktree:** skip this step — you are already on the correct branch.
+**If in a non-default workspace:** skip this step — you are already on the correct change.
 
-Check if a feature branch for this feature already exists (from a previous `/implement` run):
+Work **anonymously via change-id** during iteration — a named bookmark is only needed at push time (Step 7). This avoids bookmark churn if the feature is reworked or abandoned.
+
+Check if an in-progress feature change for this slug already exists (from a previous `/implement` run). Features are identified by the slug suffix `(#$ARGUMENTS)` in their description, and we want the latest one that has not yet been merged into `dev@origin` (covers both local-only and pushed-but-unmerged cases):
 
 ```bash
-git branch --list 'feat/*' 'fix/*'
+jj log -r 'description(glob:"*(#$ARGUMENTS)*") & ~::dev@origin' --limit 1 -T 'change_id.short()'
 ```
 
-- **Branch exists:** Switch to it.
+- **Change exists:** Switch to it.
   ```bash
-  git checkout feat/<topic>
+  jj edit <change-id>
   ```
 
-- **No branch yet:** Create one from `dev`.
+- **No change yet:** Create a new change off the latest `dev`.
   ```bash
-  git checkout dev
-  git pull --rebase origin dev
-  git checkout -b feat/<topic>
+  jj git fetch
+  jj new dev@origin -m "feat: <short description> (#$ARGUMENTS)"
   ```
 
-Use a short, descriptive kebab-case topic derived from the feature title. Prefix matches intent: `feat/` for features, `fix/` for fixes (e.g., `feat/club-preferences`, `fix/member-search`).
+Record the change-id returned by jj — the orchestration below refers to it as `<feature-change-id>`. Also note a kebab-case topic (derived from the feature title; used in Step 7 as the bookmark name). Prefix matches intent: `feat/` for features, `fix/` for fixes (e.g., `feat/club-preferences`, `fix/member-search`).
+
+jj auto-snapshots the working copy on every command — there is no staging area. Do not invoke `git` directly; co-located git state is kept in sync by jj.
 
 ## Rules
 
@@ -102,8 +106,8 @@ Use this prompt structure for all implementation subagents:
    Implement sub-feature <sub-feature-slug> for feature $ARGUMENTS.
 
    Context:
-   - Branch: <current branch name>
-   - Previously completed sub-features: <list of completed sub-feature slugs and what they did>
+   - Feature change-id: <feature-change-id> (the shared parent; your work will land as a descendant of this change)
+   - Previously completed sub-features: <list of completed sub-feature slugs, their change-ids, and what they did>
    <if explore-first, include:>
    - Codebase exploration findings: <paste explore agent output>
 
@@ -119,15 +123,28 @@ Use this prompt structure for all implementation subagents:
    3. Run the Validation command from the recipe.
    4. Write unit/integration tests that verify the Requirements and Edge Cases.
    5. Verify all Acceptance Criteria are addressed before committing.
-   6. Commit:
-      git add -A
-      git commit -m "<type>: <description> (#<sub-feature-slug>)"
+   6. Commit — mechanism depends on how you were dispatched:
+
+      **Serial (no isolation):** you are in the main jj workspace. Use jj:
+        jj commit -m "<type>: <description> (#<sub-feature-slug>)"
+        # Capture and report the change-id of what you just committed:
+        jj log -r @- --no-graph -T 'change_id.short()'
+      Report the resulting `<final-change-id>` — the main agent uses it for Step 5 review tracking.
+
+      **Parallel (isolation: "worktree"):** you are in a git worktree that is NOT a jj workspace. Use git:
+        git checkout -b sub/<sub-feature-slug>
+        git add <specific-files>        # or -A if scope is the whole worktree
+        git commit -m "<type>: <description> (#<sub-feature-slug>)"
+        # Capture and report the commit hash:
+        git rev-parse HEAD
+      Report the resulting `<commit-hash>` — the main agent uses it for the n-way jj merge after importing refs.
+
       Commit types: feat, fix, ref, test, docs, chore, style. Use imperative mood, focus on outcomes.
-   7. Report back with a status, summary, and evidence:
-      - DONE — what was implemented, files changed. Paste test output as evidence if applicable.
-      - DONE_WITH_CONCERNS — implemented, but something feels wrong or fragile. Describe the concern. Paste test output as evidence if applicable.
-      - BLOCKED — cannot proceed. Describe what's missing or ambiguous.
-      - REPLAN — what the recipe assumes vs what's actually true, and a suggested fix.
+   7. Report back with a status, summary, and evidence. Include the **handle** from step 6 (a jj change-id if you ran serially, a git commit hash if you ran in an isolated worktree):
+      - DONE — what was implemented, files changed, **handle**. Paste test output as evidence if applicable.
+      - DONE_WITH_CONCERNS — implemented, but something feels wrong or fragile. Describe the concern. Include **handle**. Paste test output as evidence if applicable.
+      - BLOCKED — cannot proceed. Describe what's missing or ambiguous. (No handle needed.)
+      - REPLAN — what the recipe assumes vs what's actually true, and a suggested fix. (No handle needed.)
       Use DONE_WITH_CONCERNS over guessing silently. The main agent will decide how to proceed.
 
    If this is a bug fix (has `bug` label):
@@ -153,14 +170,49 @@ Use this prompt structure for all implementation subagents:
 
 3. **Launch implementation subagent(s):**
    - **Single ready issue:** launch one subagent using the prompt template above.
-   - **Multiple ready issues:** launch one subagent per issue concurrently using `isolation: "worktree"`. Each works in an isolated worktree. After all complete, merge worktree branches back sequentially and delete the merged branch:
+   - **Multiple ready issues:** launch one subagent per issue concurrently using `isolation: "worktree"` (the Agent tool's isolation parameter creates a **git worktree** sharing `.git` with the main workspace). In a colocated jj repo, git commits made inside that worktree are backend-visible to jj in the main workspace after a `jj git import`, which is exactly how the main agent reconciles parallel work below.
+
+     **Why subagents commit via git, not jj:** an Agent-tool worktree has its own git index but no `.jj/working_copy/` metadata, so it is not a jj workspace. The subagent cannot safely run `jj commit` there. Subagents use `git` inside their worktree; the main agent (on a real jj workspace) does all jj operations.
+
+     Each subagent, inside its isolated worktree:
      ```bash
-     git merge <worktree-branch-1> --no-edit
-     git branch -d <worktree-branch-1>
-     git merge <worktree-branch-2> --no-edit
-     git branch -d <worktree-branch-2>
+     git checkout -b sub/<sub-feature-slug>
+     # edit, test, etc.
+     git add <specific-files>        # or -A if scope is the whole worktree
+     git commit -m "<type>: <description> (#<sub-feature-slug>)"
+     git rev-parse HEAD              # capture the sub-feature commit hash to report back
      ```
-     If merge conflict: delete the conflicting worktree branch (`git branch -D <branch>`), then fall back to sequential re-implementation of the conflicting sub-feature on the main branch.
+     Require each subagent to report its final **git commit hash** in the DONE/DONE_WITH_CONCERNS response. The main agent treats these hashes as handles for the merge below — no bookmarks needed.
+
+     After all subagents return, the main agent **imports the new git refs** so jj sees them as changes:
+     ```bash
+     jj git import
+     ```
+     Each reported git commit hash now resolves to a jj change. The main agent merges them into the feature change in **one n-way merge** (conflicts are recorded inline, not fatal):
+     ```bash
+     jj new <feature-change-id> <sub-commit-hash-1> <sub-commit-hash-2> ... <sub-commit-hash-N> -m "merge: sub-features for $ARGUMENTS (#$ARGUMENTS)"
+     ```
+     jj accepts commit hashes and change-ids interchangeably as revision specifiers.
+
+     **Inspect for conflicts:**
+     ```bash
+     jj status
+     jj resolve --list
+     ```
+
+     If `jj resolve --list` reports conflicted paths, resolve them **inline here**, in this phase — do not defer, do not abandon work:
+
+     a. For each conflicted path, Read the file. jj has materialized conflict markers (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`) in place.
+     b. Apply the same cross-sub-feature review logic that Step 5 uses (type flow, import resolution, contract alignment, shared-state consistency) to decide the correct unified content. Edit the file to remove the markers and produce a coherent result.
+     c. After all files are resolved: `jj status` should report no remaining conflicts. The auto-snapshot has already absorbed your edits into the merge change (`@`); no explicit squash needed.
+
+     d. Clean up the temporary sub-feature branches once merged. The Agent tool auto-reclaims the worktree directory when the subagent returns — do not remove it manually:
+        ```bash
+        git branch -D sub/<sub-feature-slug>    # delete the temporary sub-feature branches
+        jj git import                            # re-import so jj forgets the deleted git refs
+        ```
+
+     **No work is ever discarded.** jj records conflicts as data in the change graph; resolution is an edit, not a re-implementation. Once merged, jj's change-ids for the sub-feature work are stable across subsequent amends — the ledger reference survives.
 
 4. **Handle subagent status:**
    - **BLOCKED:** STOP and report the blocker to the user. Do not proceed to the next sub-feature.
@@ -195,7 +247,7 @@ After all sub-features are implemented, the main agent reviews the cumulative ch
 - **Medium (4-6 sub-features or has parallel groups):** Full review as described below.
 - **Large (7+ sub-features):** Full review plus cross-module integration check.
 
-1. **Build the review map:** Run `git diff --stat` and `git log --oneline` for the feature's commits. Group changed files by sub-feature (match commits to sub-feature slugs). Identify **boundary files** — files modified by multiple sub-features or files that import from files changed by different sub-features.
+1. **Build the review map:** Run `jj diff --from dev@origin --stat` and `jj log -r 'dev@origin..@' -T builtin_log_oneline` for the feature's commits. Group changed files by sub-feature (match commit descriptions to sub-feature slugs). Identify **boundary files** — files modified by multiple sub-features or files that import from files changed by different sub-features.
 
 2. **Spec compliance check** — For each sub-feature, verify the implementation actually satisfies its Requirements and Acceptance Criteria. Distrust the subagent's self-report — read the code directly. Flag:
    - Requirements not implemented or only partially implemented
@@ -227,8 +279,7 @@ After all sub-features are implemented, the main agent reviews the cumulative ch
 
 5. **If issues are found:** Fix them and commit with a message describing what was actually fixed:
    ```bash
-   git add -A
-   git commit -m "ref: <describe the specific fix> (#$ARGUMENTS)"
+   jj commit -m "ref: <describe the specific fix> (#$ARGUMENTS)"
    ```
 
 6. **If everything looks clean:** Proceed to the next step.
@@ -247,13 +298,32 @@ Only move UAT to **ready** if all coding sub-features are **done**. If any bug-l
 planwise status <uat-number> ready
 ```
 
-### Step 8: Move feature to in-review
+### Step 7: Move feature to in-review and anchor the bookmark
 
 ```bash
 planwise status $ARGUMENTS in-review
 ```
 
-### Step 9: Report
+Now — and only now — anchor the named bookmark on the tip of the feature work. Throughout iteration you worked anonymously via change-ids; push requires a named bookmark.
+
+Use a revset to find the feature head robustly — `@-` is **not** reliable here because after a parallel n-way merge with no review-fix commit, `@` is itself the merge/feature head (not an empty working-copy change on top of one):
+
+```bash
+FEATURE_HEAD=$(jj log -r 'heads(dev@origin..@ ~ empty())' --no-graph -T 'change_id.short()' --limit 1)
+jj bookmark create feat/<topic> -r "$FEATURE_HEAD"
+```
+
+The revset `dev@origin..@ ~ empty()` selects all non-empty changes between `dev@origin` and `@`; `heads(...)` picks the tip. This is correct whether the feature ends at the merge change itself or at a review-fix commit above it.
+
+If a bookmark with the same name already exists from a prior run, move it forward:
+
+```bash
+jj bookmark set feat/<topic> -r "$FEATURE_HEAD"
+```
+
+jj will reject a non-fast-forward move without `--allow-backwards`. If the move is rejected, investigate — it usually means the bookmark was rewound elsewhere and the new head is behind it. Do not force with `--allow-backwards`; fix the underlying cause.
+
+### Step 8: Report
 
 Use Done for regular tasks, Pending for bug fixes left open.
 
@@ -265,7 +335,7 @@ Summary:
 - 52 — [title] (X tests written, all passing) Done
 - 53 — [title] (X tests written, all passing) Pending — Bug fix awaiting your verification
 
-Branch: feat/<topic>
+Bookmark: feat/<topic>
 Commits: X commits
 
 Retrospective:
@@ -273,7 +343,7 @@ Retrospective:
 - What to do differently next time: [Y]
 
 Next steps:
-1. Push the branch: git push --force-with-lease -u
+1. Push the bookmark: jj git push --bookmark feat/<topic>
 2. Verify any open bug fixes and close them when satisfied
 3. Work through the test checklist in the [UAT] sub-feature
 4. When all tests pass, close the UAT and feature, then tell me to create the PR

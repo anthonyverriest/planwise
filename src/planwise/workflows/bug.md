@@ -61,11 +61,27 @@ If a failing test is genuinely impractical (e.g., visual layout glitch and no vi
 
 ### If regression
 
+Primary forensic: annotate the suspect file to see which change last modified each line (jj's equivalent of `git blame`):
+
 ```bash
-git log --oneline -20 -- <suspect-file>
+jj file annotate <suspect-file>
 ```
 
-Identify the suspect commit. If the window is bigger than ~10 commits, manual-bisect to narrow. Record `<hash> <subject>` for the body.
+Focus on the line(s) matching the bug symptom — the annotation maps each line directly to the change-id that introduced it.
+
+For broader context, walk the chronological change history that touched the file:
+
+```bash
+jj log -r 'file("<suspect-file>")' --limit 20 -T builtin_log_oneline
+```
+
+If a specific change-id looks suspect, inspect its full evolution (rewrites, amends, prior states before the current snapshot) — this is jj-only signal that often reveals why the bad line landed:
+
+```bash
+jj evolog <suspect-change-id>
+```
+
+If the window is bigger than ~10 changes, manual-bisect to narrow. Record `<change-id> <description>` for the body.
 
 ## Phase 2: Diagnose & spec
 
@@ -94,7 +110,7 @@ If the analysis surfaces a non-trivial fix choice (patch at call site vs fix sha
 - Priority: <P0|P1|P2|P3>
 - Reproducibility: <always|intermittent (rate)|once|cannot>
 - Regression: <yes|no|unknown>
-- Regressed by: <commit-hash short-subject>   (omit if not a regression or not isolated)
+- Regressed by: <change-id short-description>   (omit if not a regression or not isolated)
 
 ## Context
 [If parented: "Part of <parent-type> <parent-slug> — [parent title]." Add UAT linkage if found during user acceptance testing.]
@@ -150,7 +166,7 @@ MUST NOT contain placeholder language — every instruction must be actionable a
 - File paths in *Root Cause* and *Implementation Notes* exist (Glob/Read)
 - Function signatures, schemas, and interfaces match what the code actually has (Read/Grep)
 - Referenced CLAUDE.md sections exist and say what you think they say
-- The `Regressed by` commit (if present) actually touches the cited lines (`git show <hash> -- <file>`)
+- The `Regressed by` change (if present) actually touches the cited lines (`jj show <change-id> <file>`)
 - The failing test was actually run and actually fails
 
 If anything is wrong, correct the body now.
@@ -225,7 +241,7 @@ Bug: <new-slug> — Fix: <description>
 Triage: <severity> / <priority> / <reproducibility>
 [If parented:  Linked to <parent-type> <parent-slug>]
 [If standalone: Standalone bug — no parent]
-[If regression: Regressed by <commit-hash>]
+[If regression: Regressed by <change-id>]
 Failing test: @<test-path>
 Status: ready
 

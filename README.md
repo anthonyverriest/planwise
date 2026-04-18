@@ -1,6 +1,6 @@
 # Planwise
 
-Structured planning for Claude Code. Project-local, git-friendly.
+Structured planning for Claude Code. Project-local, jj-native (colocated with git).
 
 ## What it does
 
@@ -17,6 +17,23 @@ bug (captured anytime, independent flow)
 ## Install
 
 Planwise ships a CLI (`pw` / `planwise`), so an isolated tool install is recommended.
+
+### Prerequisites
+
+Planwise workflows drive [**jj (Jujutsu)**](https://github.com/jj-vcs/jj) as the version control system. jj operates in **colocated mode** with an existing git repo — your git remote, CI, and teammates keep using git unchanged.
+
+```bash
+# Install jj — see https://github.com/jj-vcs/jj for your platform
+cargo install --locked --bin jj jj-cli   # or: brew install jj, etc.
+
+# In an existing git project, enable colocated jj:
+cd your-project
+jj git init --colocate
+```
+
+After colocation, every `jj commit` / `jj rebase` / `jj git push` roundtrips to git — `git log` on the remote shows conventional commits.
+
+### Planwise CLI
 
 **With uv (recommended):**
 
@@ -246,16 +263,16 @@ pw init --layout python-web              # seed a layout into an existing projec
 - Each project gets a `planwise/` directory with markdown files organized by status
 - Issues use YAML frontmatter for metadata, markdown body for details
 - Dependencies form a DAG — `ready` shows what's unblocked, `blocked` shows what's waiting
-- File-based storage means everything is git-trackable and diffable
+- File-based storage means everything is version-controllable and diffable
 
 ## Parallel execution
 
-Parallelism operates at two levels, both using git worktrees:
+Parallelism operates at two levels, both using **jj workspaces** (jj's equivalent of git worktrees, backed by a single shared repo and the operation log):
 
-- **Multiple features concurrently.** Launch separate Claude Code sessions, each implementing a different feature in its own worktree on its own feature branch. The per-feature lock check ensures no two sessions work on the same feature, while the shared `planwise/` directory keeps issue state consistent across worktrees.
-- **Multiple sub-features within a feature.** When the dependency graph surfaces independent sub-features (no mutual deps), the `implement` workflow dispatches them concurrently — one subagent per sub-feature, each in an isolated worktree. After all complete, branches merge back sequentially.
+- **Multiple features concurrently.** Launch separate Claude Code sessions, each implementing a different feature in its own jj workspace on its own feature bookmark. The per-feature lock check ensures no two sessions work on the same feature, while the shared `planwise/` directory keeps issue state consistent across workspaces. Stale working copies (caused by another workspace rewriting a shared change) are reconciled with `jj workspace update-stale`.
+- **Multiple sub-features within a feature.** When the dependency graph surfaces independent sub-features (no mutual deps), the `implement` workflow dispatches them concurrently — one subagent per sub-feature, each in an isolated jj workspace. After all complete, all sub-feature heads merge into the feature change in a **single n-way merge**. Conflicts are recorded inline as first-class data in the change graph (not a fatal error) and are resolved in-place by Claude during the same `/implement` phase — no work is discarded, no sequential re-implementation fallback.
 
-No manual worktree setup needed. The workflow detects whether it's running in a worktree and adjusts its behavior (skips branch creation, relaxes the multi-feature lock check).
+No manual workspace setup needed. The workflow detects whether it's running in a non-default workspace and adjusts its behavior (skips bookmark creation, relaxes the multi-feature lock check).
 
 ## CLI reference
 

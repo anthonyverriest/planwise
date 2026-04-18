@@ -4,7 +4,7 @@ description: "Codebase evolution engine — optimize, fix, and verify code acros
 
 # Optimize — Codebase Evolution Engine
 
-Hill-climbing to a local optimum: unified analysis finds both problems and opportunities, a self-adversarial challenge refines the plan before execution, fixes land first, then optimizations, the loop repeats on the same scope until nothing improves. Every change is verified by checks (typecheck/lint/test), committed on pass, reverted on fail. On a feature branch — revert is free.
+Hill-climbing to a local optimum: unified analysis finds both problems and opportunities, a self-adversarial challenge refines the plan before execution, fixes land first, then optimizations, the loop repeats on the same scope until nothing improves. Every change is verified by checks (typecheck/lint/test), committed on pass, reverted on fail. On a jj feature change — revert is free via the operation log.
 
 ## Dimensions
 
@@ -92,7 +92,7 @@ Tests are the evaluator. Agents MUST NOT modify test files and test fixtures (e.
 
 ## Phase 1: Resolve scope
 
-**Base branch is `dev`** All diffs, comparisons, and scope resolution use `dev`.
+**Base is `dev@origin`** All diffs, comparisons, and scope resolution use the `dev` bookmark on the remote.
 
 - **Issue slug** — `$ARGUMENTS` matches an existing issue slug.
   ```bash
@@ -104,7 +104,7 @@ Tests are the evaluator. Agents MUST NOT modify test files and test fixtures (e.
 
 - **None** — no `$ARGUMENTS` provided. Default to changed files:
   ```bash
-  git diff dev --name-only
+  jj diff --from dev@origin --name-only
   ```
   No changed files vs dev → stop.
 
@@ -113,11 +113,12 @@ Record: scope type, file list, initial file count.
 ## Phase 2: Baseline + snapshot
 
 ```bash
-git diff dev --stat
-git tag -f optimize-baseline
+jj diff --from dev@origin --stat
+BASELINE_OP=$(jj op log --limit 1 --no-graph -T 'id.short()')
+echo "$BASELINE_OP" > .jj-optimize-baseline-op
 ```
 
-Snapshot created. If optimize goes wrong at any point: `git reset --hard optimize-baseline && git tag -d optimize-baseline`.
+Snapshot created via the jj operation log. If optimize goes wrong at any point: `jj op restore "$(cat .jj-optimize-baseline-op)" && rm .jj-optimize-baseline-op` — this rewinds the entire repo state (all changes made since the snapshot are undone atomically).
 
 Verify checks pass before starting — don't optimize broken code:
 
@@ -140,9 +141,9 @@ scope = initial_file_list
 
 No hard caps. No subjective scoring. Convergence is the **only** termination signal.
 
-**Mechanism:** snapshot `pre_hash=$(git rev-parse HEAD)` before each iteration. After all fixes and evolutions are applied: `post_hash=$(git rev-parse HEAD)`.
+**Mechanism:** snapshot `pre_id=$(jj log -r @ --no-graph -T 'change_id.short()')` before each iteration. After all fixes and evolutions are applied: `post_id=$(jj log -r @ --no-graph -T 'change_id.short()')`.
 
-- `pre_hash == post_hash` → nothing landed → converged → exit.
+- `pre_id == post_id` → nothing landed → converged → exit.
 - Triage produces empty plan (all findings in `skipped` or `failed`) → stuck → exit.
 
 **Cost checkpoint:** after `ceil(initial_file_count / 3, min=5)` cumulative commits, pause and report progress to the user. User decides: continue or stop. Reset counter on continue.
@@ -161,7 +162,7 @@ $RULES
 
 The goal: produce the best possible plan before touching any code. Analysis, triage, and challenge form a tight inner loop — the challenger can trigger re-analysis when it discovers gaps.
 
-`iteration++`. Snapshot: `pre_hash=$(git rev-parse HEAD)`.
+`iteration++`. Snapshot: `pre_id=$(jj log -r @ --no-graph -T 'change_id.short()')`.
 Initialize: `challenge_ledger = []` (persists across discovery cycles within this iteration).
 
 #### Step 1: Analyze
@@ -306,11 +307,30 @@ Steps:
    PARTIAL: [one-line what remains] | Files: [list]
 ```
 
-After each fix agent returns, run the project's check command (typecheck, lint, test). If the project defines a `/check` command or documents its check process in CLAUDE.md, use that. Otherwise, identify and run the appropriate commands for the project's language/framework.
+After each fix agent returns, **commit immediately** — jj's auto-snapshot has already captured the edits, and a committed change is cheaper and safer to reverse than uncommitted working-copy edits. Commit order is: capture restore-point → commit → run checks → restore on failure.
 
-**Pass:** `git diff --stat` — review net line delta. If additions significantly outweigh deletions, verify the added complexity is justified by the findings. Stage only files reported as modified (`git add <file1> <file2> ...`). Never `git add -A`. Commit: `git commit -m "optimize: fix [brief description]"`. Record in ledger with outcome `committed` and list `affected_files`. Increment `total_commits`.
+1. `jj diff --stat` — review net line delta. If additions significantly outweigh deletions, verify the added complexity is justified by the findings.
+2. If stray edits outside the fix's scope landed in the working copy, split them out before committing: `jj split <file1> <file2> ...` to keep only intended files in the commit. Otherwise skip — explicit-path `jj commit` is unnecessary ceremony when the auto-snapshot already reflects the agent's edits.
+3. Capture the op-id **before** committing so later rollback is deterministic regardless of any auto-snapshots check tools may trigger:
+   ```bash
+   PRE_COMMIT_OP=$(jj op log --limit 1 --no-graph -T 'id.short()')
+   jj commit -m "optimize: fix [brief description]"
+   ```
+4. Run the project's check command (typecheck, lint, test). If the project defines a `/check` command or documents its check process in CLAUDE.md, use that. Otherwise, identify and run the appropriate commands for the project's language/framework.
 
-**Fail:** dispatch targeted fix agent with same rules (including evaluator lock). Re-run checks. Pass → commit as above. Still fails → `git reset HEAD --hard`, record in ledger with outcome `reverted`, add to `failed`.
+**Pass:** record in ledger with outcome `committed` and list `affected_files`. Increment `total_commits`.
+
+**Fail:** dispatch targeted fix agent with same rules (including evaluator lock). The retry agent's edits land in the current working-copy change (`@`, the empty change jj created after your commit). Re-run checks.
+- **Pass on retry:** amend the original commit with the follow-up edits:
+  ```bash
+  jj squash   # moves @ into @-, leaving a single commit with combined edits
+  ```
+  Record in ledger as `committed`.
+- **Still fails:** restore the repo to the exact state from before the commit:
+  ```bash
+  jj op restore "$PRE_COMMIT_OP"
+  ```
+  This reverses the commit, the retry-agent edits, and any check-tool auto-snapshots atomically. Record in ledger with outcome `reverted`, add to `failed`.
 
 SKIPPED findings → add to `skipped`.
 
@@ -341,17 +361,27 @@ Steps:
 
 2. If SKIP → record in ledger, move to next proposal.
 
-3. Run the project's check command (typecheck, lint, test). If the project defines a `/check` command, use that. Otherwise, identify and run the appropriate commands for the project's language/framework.
+3. Capture the pre-commit op-id, then commit immediately (auto-snapshot captures the agent's edits). If stray non-proposal edits leaked in, `jj split` them out first:
+   ```bash
+   PRE_COMMIT_OP=$(jj op log --limit 1 --no-graph -T 'id.short()')
+   jj commit -m "optimize: evolve — [proposal title]"
+   ```
 
-4. **Pass:** stage only files reported as modified (`git add <file1> ...`). `git commit -m "optimize: evolve — [proposal title]"`. Record in ledger with outcome `committed` and `affected_files`. Increment `total_commits`.
+4. Run the project's check command (typecheck, lint, test). If the project defines a `/check` command, use that. Otherwise, identify and run the appropriate commands for the project's language/framework.
 
-5. **Fail:** `git reset HEAD --hard`. Record in ledger with outcome `reverted`, add to `failed`. Move to next proposal.
+5. **Pass:** record in ledger with outcome `committed` and `affected_files`. Increment `total_commits`.
+
+6. **Fail:** restore the repo to the exact pre-commit state:
+   ```bash
+   jj op restore "$PRE_COMMIT_OP"
+   ```
+   Record in ledger with outcome `reverted`, add to `failed`. Move to next proposal.
 
 ### Phase 6: Converge or continue
 
-`post_hash=$(git rev-parse HEAD)`.
+`post_id=$(jj log -r @ --no-graph -T 'change_id.short()')`.
 
-- `pre_hash == post_hash` → nothing landed → **converged**. Go to Phase 7.
+- `pre_id == post_id` → nothing landed → **converged**. Go to Phase 7.
 - **Cost checkpoint:** if `total_commits >= ceil(initial_file_count / 3, min=5)` since last checkpoint → report progress to user. User says stop → go to Phase 7. User says continue → reset checkpoint counter.
 - Return to Phase 3 (same scope — ledger prevents redundant work).
 
@@ -365,7 +395,7 @@ Collect finding/proposal counts from the first analysis (iteration 1) and final 
 # Optimization Report
 
 ## Scope
-[type, initial file count, modules/packages, branch]
+[type, initial file count, modules/packages, bookmark]
 
 ## Summary
 [2-3 sentences]
@@ -406,7 +436,7 @@ CONVERGED (no remaining) | STUCK (skipped/manual-only remain) | STOPPED (user ha
 typecheck: P/F | lint: P/F | test: P/F
 
 ## Rollback
-To undo all optimize changes: `git reset --hard optimize-baseline && git tag -d optimize-baseline`
+To undo all optimize changes: `jj op restore "$(cat .jj-optimize-baseline-op)" && rm .jj-optimize-baseline-op`
 
 Next:  /next
 Tip: /clear or /compact first if context is heavy.

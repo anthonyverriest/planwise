@@ -10,7 +10,7 @@ But you can't break what you haven't defined. **Stage 1** locks down the behavio
 
 ## Deliverable
 
-The output of this workflow is **new test files committed to the branch**. Running existing tests and reporting their results is not the goal — writing new tests is. If the workflow ends without new test commits, it has failed.
+The output of this workflow is **new test files committed to the test bookmark**. Running existing tests and reporting their results is not the goal — writing new tests is. If the workflow ends without new test commits, it has failed.
 
 ## Production code lock
 
@@ -20,7 +20,7 @@ Agents MUST NOT modify non-test files (anything outside test directories and tes
 
 ## Phase 1: Resolve scope
 
-**Base branch is `dev`** All diffs and scope resolution use `dev`.
+**Base is `dev@origin`** All diffs and scope resolution use the `dev` bookmark on the remote.
 
 - **Issue slug** — `$ARGUMENTS` matches an existing issue slug.
   ```bash
@@ -32,24 +32,28 @@ Agents MUST NOT modify non-test files (anything outside test directories and tes
 
 - **None** — no `$ARGUMENTS` provided. Default to changed files:
   ```bash
-  git diff dev --name-only
+  jj diff --from dev@origin --name-only
   ```
   No changed files vs dev → stop.
 
 Record: scope type, file list, target description.
 
-### Branch strategy
+### Bookmark strategy
 
-Tests commit to a branch, never directly to `dev`. Check if a test branch exists:
+Tests commit to a bookmark, never directly to `dev`. Check if a test bookmark exists:
 
 ```bash
-git branch --list 'test/*'
+jj bookmark list --all-remotes | grep '^test/'
 ```
 
-- **Branch exists:** switch to it.
-- **No branch yet:** create one from the current feature branch (if on one) or from `dev`:
+- **Bookmark exists:** switch to it.
   ```bash
-  git checkout -b test/<target-slug>
+  jj edit test/<target-slug>
+  ```
+- **No bookmark yet:** create a new change off the current feature change (if on one) or off `dev@origin`, and anchor a bookmark:
+  ```bash
+  jj new -m "test: <target-slug>"
+  jj bookmark create test/<target-slug> -r @
   ```
 
 ## Phase 2: Reconnaissance
@@ -269,7 +273,7 @@ Functional tests first (they establish the baseline), then adversarial. Dispatch
 Write functional tests for [target file(s)].
 
 Context:
-- Branch: [current branch]
+- Bookmark: [current bookmark] (jj change id: [current change id])
 - Test infrastructure: [full explore output from Phase 2 Step 2 — reusable helpers with signatures and import paths, assertion patterns, fixture/factory snippets, supported test types]
 - Follow the project's existing test patterns for setup, assertions, and async handling
 
@@ -292,7 +296,7 @@ Max 8 attack vectors per agent.
 Write adversarial tests for [target file(s)].
 
 Context:
-- Branch: [current branch]
+- Bookmark: [current bookmark] (jj change id: [current change id])
 - Test infrastructure: [full explore output from Phase 2 Step 2 — reusable helpers with signatures and import paths, assertion patterns, fixture/factory snippets, supported test types]
 - Functional tests already written: [summary of Stage 1 tests — what contracts are locked down]
 - Follow the project's existing test patterns for setup, assertions, and async handling
@@ -336,10 +340,9 @@ After each agent returns:
 
 4. **Commit all tests** (passing + skip/ignore-annotated). Ignored tests document findings and won't break CI:
    ```bash
-   git add <test_files_only>
-   git commit -m "test: [functional|adversarial] tests for [target] — [summary]"
+   jj commit <test_files_only> -m "test: [functional|adversarial] tests for [target] — [summary]"
    ```
-   Never `git add -A`. Never commit non-test files.
+   Pass explicit test paths to `jj commit` so non-test files remain in the working copy and are excluded from this commit. If non-test edits crept into the working copy, `jj restore <non-test-paths>` them first.
 
 ## Phase 6: Verify
 
@@ -361,7 +364,7 @@ Populate from the `ledger` and `deferred` lists. Each section maps directly to l
 # Test Report
 
 ## Scope
-[target description, file count, branch]
+[target description, file count, bookmark]
 
 ## Research
 [Key expert techniques discovered and applied from WebSearch, or "Skipped — standard domain" if Phase 2 Step 3 was not run]
