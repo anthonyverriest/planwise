@@ -18,6 +18,10 @@ Agents MUST NOT modify non-test files (anything outside test directories and tes
 
 ## Target: $ARGUMENTS
 
+## Stale-trunk check
+
+If the current change is based on `dev@origin` and the remote has advanced, rebase first: `jj rebase -d dev@origin`. jj records any conflicts as data and they are resolved inline.
+
 ## Phase 1: Resolve scope
 
 **Base is `dev@origin`** All diffs and scope resolution use the `dev` bookmark on the remote.

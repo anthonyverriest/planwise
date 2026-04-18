@@ -8,19 +8,6 @@ Implement all coding sub-features for an feature following its dependency graph.
 
 ## Target: Feature $ARGUMENTS
 
-## Workspace detection
-
-Before starting, detect whether you are running inside a non-default jj workspace:
-
-```bash
-jj workspace list
-```
-
-If the active workspace (shown by `jj workspace list` with `@` marker, or inferred from the current directory relative to workspace roots) is not `default`, you are in a **workspace session** — another feature is being implemented in the default workspace. This is expected during parallel multi-feature execution. In workspace mode:
-- You are already on the correct feature change — skip bookmark creation (Step 2).
-- Other features may be `in-progress` concurrently — this is normal, not a conflict.
-- If your working copy appears stale (another workspace rewrote a shared change), run `jj workspace update-stale`.
-
 ## Process
 
 ### Step 1: Read the feature
@@ -47,8 +34,6 @@ planwise status $ARGUMENTS in-progress
 
 ### Step 2: Create or switch to the feature change
 
-**If in a non-default workspace:** skip this step — you are already on the correct change.
-
 Work **anonymously via change-id** during iteration — a named bookmark is only needed at push time (Step 7). This avoids bookmark churn if the feature is reworked or abandoned.
 
 Check if an in-progress feature change for this slug already exists (from a previous `/implement` run). Features are identified by the slug suffix `(#$ARGUMENTS)` in their description, and we want the latest one that has not yet been merged into `dev@origin` (covers both local-only and pushed-but-unmerged cases):
@@ -69,6 +54,23 @@ jj log -r 'description(glob:"*(#$ARGUMENTS)*") & ~::dev@origin' --limit 1 -T 'ch
   ```
 
 Record the change-id returned by jj — the orchestration below refers to it as `<feature-change-id>`. Also note a kebab-case topic (derived from the feature title; used in Step 7 as the bookmark name). Prefix matches intent: `feat/` for features, `fix/` for fixes (e.g., `feat/club-preferences`, `fix/member-search`).
+
+**Stale-trunk check:** if the feature change already existed and `jj git fetch` pulled new commits on `dev@origin`, rebase before resuming work: `jj rebase -d dev@origin` (on the feature change). Rebase never blocks — jj records conflicts as data. Then run the **conflict resolution protocol** (see below) before proceeding.
+
+### Conflict resolution protocol
+
+After any rebase or merge, check for conflicts:
+```bash
+jj resolve --list
+```
+
+For each conflicted path:
+1. Read the file. jj has materialized conflict markers (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`).
+2. `jj show` the trunk change that introduced the conflicting side — recover its intent.
+3. Classify:
+   - **Mechanical** (imports, formatting, non-overlapping additions, one side deletes what the other doesn't touch) → resolve inline. Edit the file to produce the coherent merged result.
+   - **Semantic** (both sides changed the same logic with different intent) → STOP. Show the user the conflicted paths, the diff from each side, and ask which intent to keep. Do not guess.
+4. After resolution, `jj status` must report no remaining conflicts before continuing.
 
 jj auto-snapshots the working copy on every command — there is no staging area. Do not invoke `git` directly; co-located git state is kept in sync by jj.
 
@@ -344,9 +346,10 @@ Retrospective:
 
 Next steps:
 1. Push the bookmark: jj git push --bookmark feat/<topic>
-2. Verify any open bug fixes and close them when satisfied
-3. Work through the test checklist in the [UAT] sub-feature
-4. When all tests pass, close the UAT and feature, then tell me to create the PR
+2. Open the PR: gh pr create --base dev --head feat/<topic> --title "<feature title>" --body "Closes #$ARGUMENTS"
+3. Verify any open bug fixes and close them when satisfied
+4. Work through the test checklist in the [UAT] sub-feature
+5. When all tests pass, close the UAT and feature
 
 Next:  /next
 Tip: /clear or /compact first if context is heavy.

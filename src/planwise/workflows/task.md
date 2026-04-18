@@ -28,13 +28,52 @@ Move to in-progress:
 planwise status $ARGUMENTS in-progress
 ```
 
+## Step 1.5: Base the task change
+
+Work **anonymously via change-id** during iteration — a named bookmark is only anchored at the end (Step 7). If the task is abandoned, no bookmark churn.
+
+Check if an in-progress task change for this slug already exists (from a previous `/task` run). Tasks are identified by the slug suffix `(#$ARGUMENTS)` in their description; select the latest one not yet merged into `dev@origin`:
+
+```bash
+jj log -r 'description(glob:"*(#'"$ARGUMENTS"')*") & ~::dev@origin' --limit 1 -T 'change_id.short()'
+```
+
+- **Change exists:** switch to it.
+  ```bash
+  jj edit <change-id>
+  ```
+
+- **No change yet:** create a new change. If `@` is already on a feature change (descended from `dev@origin` but not equal to it), branch off `@` so the task lands on the feature. Otherwise, base off the latest `dev`.
+  ```bash
+  jj git fetch
+  # On a feature change? (check returns non-empty if @ is a descendant of dev@origin but not dev@origin itself)
+  jj log -r '@ & (dev@origin..)' --no-graph -T 'change_id.short()'
+  # If non-empty: jj new -m "<type>: <short description> (#$ARGUMENTS)"
+  # If empty:     jj new dev@origin -m "<type>: <short description> (#$ARGUMENTS)"
+  ```
+
+Record a kebab-case topic derived from the task title — used in Step 7 as the bookmark name.
+
+**Stale-trunk check:** if this task change is based on `dev@origin` and the remote has advanced (`jj git fetch` pulled new commits), rebase before working: `jj rebase -d dev@origin`. jj records conflicts as data, so rebase does not fail mid-flight.
+
+After rebase, check for conflicts:
+```bash
+jj resolve --list
+```
+
+For each conflicted path: Read the file, `jj show` the trunk change that introduced the conflicting side to recover intent, then classify:
+- **Mechanical** (imports, formatting, non-overlapping additions, one-side deletes) → resolve inline.
+- **Semantic** (both sides changed the same logic with different intent) → STOP, show the user the conflicted paths and both sides, ask which intent to keep. Do not guess.
+
+`jj status` must report no remaining conflicts before continuing.
+
 ## Rules
 
 $RULES
 
 ## Step 2: Implement
 
-Work on the current jj change. Read each file immediately before editing. Follow the rules above. Respect the spec's Constraints section — these are regressions that must not happen.
+Read each file immediately before editing. Follow the rules above. Respect the spec's Constraints section — these are regressions that must not happen.
 
 No scope creep — only modify files listed in the Scope section. If you believe an unlisted file needs changing, STOP and report to the user — do not modify it yourself.
 
@@ -204,7 +243,19 @@ If the domain file's summary, tags, or entry titles changed, update the correspo
 
 If no updates needed, skip.
 
-## Step 7: Close and report
+## Step 7: Anchor bookmark, close, and report
+
+Anchor the named bookmark on the task head. Use a revset to find it robustly:
+
+```bash
+TASK_HEAD=$(jj log -r 'heads(dev@origin..@ ~ empty())' --no-graph -T 'change_id.short()' --limit 1)
+# Prefix: task/ for regular tasks, fix/ if the task is a bug fix.
+jj bookmark create task/<topic> -r "$TASK_HEAD" || jj bookmark set task/<topic> -r "$TASK_HEAD"
+```
+
+`jj bookmark set` rejects non-fast-forward moves without `--allow-backwards`. If rejected, investigate — do not force.
+
+Mark the task done:
 
 ```bash
 planwise status $ARGUMENTS done
@@ -224,5 +275,9 @@ Checks: typecheck P/F | lint P/F | test P/F
 
 Retrospective: [one sentence — what assumption was wrong or what you'd do differently, or "smooth — no surprises"]
 
-Bookmark: <current bookmark> (jj change id: <current change id>)
+Bookmark: task/<topic> (head: $TASK_HEAD)
+
+Next steps:
+1. Push: jj git push --bookmark task/<topic>
+2. Open the PR: gh pr create --base dev --head task/<topic> --title "<title>" --body "Closes #$ARGUMENTS"
 ```

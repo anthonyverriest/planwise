@@ -90,6 +90,21 @@ Each dimension is a **lens** — a distinct expert mindset for finding issues. T
 
 Tests are the evaluator. Agents MUST NOT modify test files and test fixtures (e.g., `tests/`, `__tests__/`, `*_test.*`, `*.spec.*`, and any test helper/fixture files). If a change breaks tests, the change is wrong — not the tests. Repeat this rule in every agent prompt.
 
+## Stale-trunk check
+
+If the current feature change is based on `dev@origin` and the remote has advanced, rebase before optimizing: `jj rebase -d dev@origin`. Rebase never blocks — jj records conflicts as data.
+
+After rebase, check for conflicts:
+```bash
+jj resolve --list
+```
+
+For each conflicted path: Read the file, `jj show` the trunk change that introduced the conflicting side to recover intent, then classify:
+- **Mechanical** (imports, formatting, non-overlapping additions, one-side deletes) → resolve inline.
+- **Semantic** (both sides changed the same logic with different intent) → STOP, show the user the conflicted paths and both sides, ask which intent to keep. Do not guess.
+
+`jj status` must report no remaining conflicts before continuing.
+
 ## Phase 1: Resolve scope
 
 **Base is `dev@origin`** All diffs, comparisons, and scope resolution use the `dev` bookmark on the remote.

@@ -56,6 +56,12 @@ Strip the steps to the smallest set that still triggers the bug. Then write a fa
 - Name it after the symptom (e.g., `test_theme_toggle_persists_across_refresh`).
 - Run it; confirm it fails with the same symptom.
 - Record the path — it goes in the body.
+- **Commit the failing test on its own change** so `/implement` picks up a clean starting point, not a polluted working copy. The bug slug is not yet known (Phase 4 creates it); commit with a symptom placeholder and capture the change-id — Phase 4 will rewrite the description with the real slug:
+  ```bash
+  jj commit <test-file> -m "test: failing repro for <symptom>"
+  FAILING_TEST_CHANGE=$(jj log -r @- --no-graph -T 'change_id.short()')
+  ```
+  Record `$FAILING_TEST_CHANGE` — you need it in Phase 4.
 
 If a failing test is genuinely impractical (e.g., visual layout glitch and no visual harness), say so explicitly in the body and explain why. Do not silently skip.
 
@@ -226,6 +232,12 @@ echo "<bug body from Phase 2>" | planwise create bug "Fix: <concise description>
 
 ```bash
 echo "<bug body from Phase 2>" | planwise create bug "Fix: <concise description>"
+```
+
+Capture the new slug from the create output (e.g. `B42-theme-toggle-persists`). Rewrite the failing-test commit description so its `(#<slug>)` suffix matches the convention used by `/memo` and other history-mining workflows:
+
+```bash
+jj describe "$FAILING_TEST_CHANGE" -m "test: failing repro for <symptom> (#<new-slug>)"
 ```
 
 Promote to ready so `/implement` will pick it up:
