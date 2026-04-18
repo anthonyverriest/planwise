@@ -185,5 +185,5 @@ Task: <task-slug> — <title>
 
 Scope: [N] files
 
-To implement:  /task <task-slug>
+Next:  /next  (or /next <slug> if multiple tasks were created)
 ```

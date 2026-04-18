@@ -18,7 +18,7 @@ def list_new_candidates(
     before: set[str],
     after: set[str],
     store: MetaStore,
-    accepted_types: frozenset[str] = frozenset({"feature", "task"}),
+    accepted_types: frozenset[str] = frozenset({"feature", "task", "bug"}),
 ) -> list[tuple[str, str]]:
     """Return [(slug, type), ...] for issues in `after - before` matching `accepted_types`.
 

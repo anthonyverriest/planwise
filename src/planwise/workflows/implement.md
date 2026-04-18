@@ -278,5 +278,5 @@ Next steps:
 3. Work through the test checklist in the [UAT] sub-feature
 4. When all tests pass, close the UAT and feature, then tell me to create the PR
 
-To write tests:  /test <feature-slug>
+Next:  /next
 ```

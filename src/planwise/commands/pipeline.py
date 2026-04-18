@@ -14,6 +14,7 @@ from planwise.workflows import expand_workflow
 _TYPE_TO_NEXT_PHASE: dict[str, str] = {
     "feature": "implement",
     "task": "task",
+    "bug": "implement",
 }
 
 

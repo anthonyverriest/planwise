@@ -374,5 +374,5 @@ Coding tasks (in order):
 User testing:
   3. <N> — [UAT] <title>
 
-To start implementation:  /implement <feature-slug>
+Next:  /next  (or /next <slug> if multiple issues were created)
 ```

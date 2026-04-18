@@ -408,5 +408,5 @@ typecheck: P/F | lint: P/F | test: P/F
 ## Rollback
 To undo all optimize changes: `git reset --hard optimize-baseline && git tag -d optimize-baseline`
 
-To distill knowledge:  /memo <feature-slug>
+Next:  /next
 ```

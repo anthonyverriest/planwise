@@ -412,5 +412,5 @@ Dimensions skipped: [list with reason, or "None"]
 ## Checks
 typecheck: P/F | lint: P/F | test: P/F
 
-To optimize:  /optimize <feature-slug>
+Next:  /next
 ```

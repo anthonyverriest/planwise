@@ -11,11 +11,13 @@ PHASE_CHAIN: dict[str, str | None] = {
     "test": "optimize",
     "optimize": "memo",
     "memo": None,
+    "bug": "implement",
 }
 
 CREATION_PHASES: dict[str, str] = {
     "plan": "feature",
     "brief": "task",
+    "bug": "bug",
 }
 
 SLUG_CONSUMING_PHASES: frozenset[str] = frozenset(

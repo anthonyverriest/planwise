@@ -229,5 +229,5 @@ Triage: <severity> / <priority> / <reproducibility>
 Failing test: @<test-path>
 Status: ready
 
-To fix:  /implement <new-slug>
+Next:  /next  (or /next <slug> if multiple bugs were created)
 ```
