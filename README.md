@@ -1,107 +1,103 @@
 # Planwise
 
-Structured planning for Claude Code. Project-local, jj-native (colocated with git).
+**Spec-driven development for Claude Code.** A planning layer, a dependency graph, and a parallel-agent runtime — so your AI coding agent ships features, not vibes.
 
-## What it does
-
-Planwise gives Claude Code a **planning layer**: features, tasks, dependencies, and status tracking — stored as markdown files inside your project.
-
-> **Roadmap:** The CLI (`pw`) is designed to be agent-agnostic — support for other AI coding tools is planned for future releases.
+> From *vibe coding* to *spec-driven coding*: Planwise turns rough ideas into structured specs, then drives Claude Code through plan → implement → test → optimize with per-phase context windows and multi-agent orchestration.
 
 ```
 plan  →  implement  →  test  →  optimize  →  memo
-
-bug (captured anytime, independent flow)
+                  ↑
+           (bug: captured anytime)
 ```
+
+Agentic workflows. Context engineering built in. File-based, git-native, zero lock-in.
+
+---
+
+## Why Planwise
+
+Autonomous coding agents are compressing delivery timelines from weeks to days — **if** you feed them the right context. Raw chat prompts don't scale past small features. Planwise is the missing planning layer:
+
+- **Spec-driven, not vibe-driven.** Every feature gets a structured issue with goals, dependencies, and acceptance criteria *before* a line of code is written.
+- **Context engineering by default.** Each workflow phase runs in its own context window — no more 200k-token soup where the agent forgets what it's building.
+- **Parallel agents, real graph.** Independent sub-features dispatch concurrently to subagents in isolated workspaces, then merge back in a single n-way merge.
+- **Agent-driven, human-steered.** You talk to Claude Code. Claude Code runs `pw` commands. You review the diff.
+- **Git-native storage.** Issues are markdown files. The knowledge base is markdown. Everything diffs, everything versions.
+
+> **V1 targets Claude Code.** Agent-agnostic support (Cursor, Codex, etc.) is on the roadmap.
+
+---
 
 ## Install
 
-Planwise ships a CLI (`pw` / `planwise`), so an isolated tool install is recommended.
+Planwise ships a CLI (`pw` / `planwise`). Isolate it.
 
 ### Prerequisites
 
-Planwise workflows drive [**jj (Jujutsu)**](https://github.com/jj-vcs/jj) as the version control system. jj operates in **colocated mode** with an existing git repo — your git remote, CI, and teammates keep using git unchanged.
+Workflows drive [**jj (Jujutsu)**](https://github.com/jj-vcs/jj) in **colocated mode** alongside git — your remote, CI, and teammates keep using git unchanged.
 
 ```bash
-# Install jj — see https://github.com/jj-vcs/jj for your platform
-cargo install --locked --bin jj jj-cli   # or: brew install jj, etc.
-
-# In an existing git project, enable colocated jj:
+cargo install --locked --bin jj jj-cli        # or: brew install jj
 cd your-project
 jj git init --colocate
 ```
 
-After colocation, every `jj commit` / `jj rebase` / `jj git push` roundtrips to git — `git log` on the remote shows conventional commits.
+Every `jj commit` / `jj rebase` / `jj git push` roundtrips to git. Conventional commits land on the remote.
 
 ### Planwise CLI
 
-**With uv (recommended):**
-
 ```bash
+# With uv (recommended)
 uv tool install git+https://github.com/anthonyverriest/planwise
-```
 
-**With pip / pipx:**
-
-```bash
+# With pipx
 pipx install git+https://github.com/anthonyverriest/planwise
-# or, into the current environment:
-pip install git+https://github.com/anthonyverriest/planwise
 ```
 
-Upgrade later with `uv tool upgrade planwise` or `pipx upgrade planwise`.
+Upgrade with `uv tool upgrade planwise` or `pipx upgrade planwise`.
+
+---
 
 ## Quick start
-
-In your terminal:
 
 ```bash
 cd your-project
 pw init --project "myapp" --prefix "MA" --agent claude --rules python --layout python-web
 ```
 
-This creates a `planwise/` directory, injects planwise instructions into `CLAUDE.md`, configures the Python ruleset, and seeds a project-specific package-layout section. Claude Code reads those instructions automatically, so it knows how to use `pw` commands when you ask it to plan, implement, or test a feature.
+This creates `planwise/`, injects agent instructions into `CLAUDE.md`, wires the Python ruleset, and seeds a hexagonal package layout. Claude Code picks it up automatically.
 
-```bash
-# Or without agent integration — just the planning directory
-pw init --project "myapp" --prefix "MA" --rules python
-```
-
-Then, inside Claude Code, just ask:
+Then, inside Claude Code:
 
 ```
-"brief: add a filter to the member list"   # plan a small feature → creates a task issue
-"task add-member-list-filter"              # execute the task — implement, test, optimize, memo
-"plan user auth with JWT"                  # larger feature — creates sub-features
-"plan user-auth"                           # plan from a backlog issue slug
-"implement user-auth"                      # build the feature's sub-features
-"test user-auth"                           # adversarial testing
+"brief: add a filter to the member list"    # small feature → one task issue
+"task add-member-list-filter"               # implement + test + optimize + memo in one pass
+"plan user auth with JWT"                   # larger feature → sub-features + dep graph
+"implement user-auth"                       # parallel subagents build sub-features
+"test user-auth"                            # adversarial testing across 6 attack dimensions
 ```
 
-**Small features** use `brief` → `task`. `brief` plans and creates a task issue, `task` implements, tests, optimizes, and updates the knowledge base in one go. No feature ceremony.
+**Small features:** `brief → task`. Plan, then execute in one shot. No ceremony.
 
-**Larger features** use `plan` → `implement` → `test` → `optimize` → `memo` as separate steps, with features, sub-features, subagents, and dependency graphs.
+**Larger features:** `plan → implement → test → optimize → memo`. Separate phases, separate context windows, parallel sub-feature execution, a knowledge-base distillation at the end.
 
-Both accept free text or an existing issue slug. When given a slug, the workflow reads the issue as starting context — so you can toss rough ideas into the backlog and flesh them out later.
+Both accept free text *or* an existing issue slug — toss rough ideas into the backlog, flesh them out later.
 
-### Advancing between phases — `/next`
+### Phase chaining — `/next`
 
-Each workflow is already a standalone skill (`/plan`, `/brief`, `/implement`, etc.). To chain them without typing the next phase manually, use `/next`. It reads the pipeline state, figures out what comes next, and prints the expanded workflow into your conversation:
+Each workflow is a standalone skill (`/plan`, `/brief`, `/implement`, …). `/next` reads pipeline state and loads the next phase into a fresh window:
 
 ```
 > /plan add oauth
-> (iterate on the plan, feature issue gets created)
-> /clear                       ← drops prior context; built-in Claude Code command
-> /next                        ← loads /implement <slug> into the fresh window
-> (iterate on implementation)
+> (iterate — feature issue gets created)
+> /clear                       ← fresh context (built-in Claude Code command)
+> /next                        ← auto-loads /implement <slug>
 > /clear
-> /next                        ← loads /test <slug>
+> /next                        ← auto-loads /test <slug>
 > ...
 ```
 
-Chains: `brief → task` for small features, `plan → implement → test → optimize → memo` for larger ones. `/next` on the last phase of either chain reports completion and clears the pipeline state. The slug of the feature/task issue created during `/plan` or `/brief` is auto-detected and threaded through.
-
-If you ran several `/plan` or `/brief` (or a mix) before typing `/next`, the pipeline session tracks every issue created. `/next` alone will list the candidates:
+Pipeline state lives on disk (`planwise/.pipeline-state.json`), so `/clear` never breaks the chain. If multiple plans ran before `/next`, it lists candidates:
 
 ```
 Multiple issues created during this planning session:
@@ -112,9 +108,7 @@ Multiple issues created during this planning session:
 Re-run as: /next <slug>  to pick one.
 ```
 
-`/next auth-oauth` picks that feature and routes to `/implement`; `/next fix-header` picks the task and routes to `/task`.
-
-The `/clear` is what gives each phase a fresh context window; pipeline state lives on disk (`planwise/.pipeline-state.json`), so `/clear` doesn't break the chain.
+---
 
 ## How it works
 
@@ -123,26 +117,26 @@ You (in Claude Code)          Claude Code                    pw CLI
 ─────────────────────         ──────────────────             ──────────────────
 "plan user auth"         →    pw run plan user auth     →    outputs workflow template
                               reads template, follows it
-                              asks you questions (plan)
+                              asks clarifying questions
                               pw create feature "..."         creates issue files
                               pw dep add ...                 wires dependencies
                               ...
 ```
 
-- **You talk to Claude Code.** You describe what you want in natural language.
-- **Claude Code runs `pw` commands.** It loads the workflow template, then uses `pw` subcommands (`create`, `status`, `dep add`, `ready`, etc.) to manage issues as the workflow directs.
-- **You don't run workflows directly.** The `pw run <workflow>` command outputs a markdown template — it's meant to be consumed by Claude Code, not read by you in a terminal.
+- **You describe intent in natural language.** The agent does the plumbing.
+- **Claude Code runs `pw` commands.** It loads the workflow template, then drives `pw` subcommands (`create`, `status`, `dep add`, `ready`, etc.) as the workflow directs.
+- **You don't run workflows directly.** `pw run <workflow>` outputs a markdown template — consumed by the agent, not read in a terminal.
 
-### What you run (your terminal)
+### What *you* run (your terminal)
 
 | Command | When |
 |---------|------|
 | `uv tool install git+https://github.com/anthonyverriest/planwise` | Once, to install |
-| `pw init --project "name" --prefix "XX" --agent claude --layout python-web` | Once per project, to set up |
+| `pw init --project "name" --prefix "XX" --agent claude --layout python-web` | Once per project |
 | `pw verify [--fix]` | Anytime, to check data integrity |
 | `pw stats` | Anytime, to see project status |
 
-### What Claude Code runs (during workflows)
+### What *Claude Code* runs (during workflows)
 
 | Command | Purpose |
 |---------|---------|
@@ -154,35 +148,33 @@ You (in Claude Code)          Claude Code                    pw CLI
 | `pw note <slug> "text"` | Add notes to issues |
 | `pw sync exec / state / reset` | Execute sync pipeline steps |
 
-You _can_ run any `pw` command yourself — they're just CLI commands. But during workflows, Claude Code drives them.
+You *can* run any `pw` command yourself — they're just CLI. But during workflows, the agent drives.
+
+---
 
 ## Workflows
 
-Planwise ships 7 workflow templates:
+Planwise ships 9 workflow templates:
 
 | Workflow | Purpose |
 |----------|---------|
-| `brief` | Lightweight planning for a small feature or fix — produces a task issue |
-| `task` | Execute a task — implement, test, optimize, and memo in one pass |
+| `brief` | Lightweight planning for a small feature/fix — produces a task issue |
+| `task` | Execute a task — implement, test, optimize, memo in one pass |
 | `plan` | Design a feature, stress-test it, create sub-features |
-| `implement` | Build a feature's sub-features via dependency graph and subagents |
+| `implement` | Build a feature's sub-features via dep graph + parallel subagents |
 | `test` | Adversarial testing across 6 attack dimensions |
 | `optimize` | Codebase evolution engine across 4 dimensions |
 | `bug` | Capture bugs during UAT |
 | `memo` | Distill a completed feature into the knowledge base |
-| `sync` | Walk multi-step operations (e.g., dev→prod) with the agent — catches missed steps, diagnoses failures across tools |
+| `sync` | Walk multi-step ops (dev→prod, migrations) — catches missed steps, diagnoses failures across tools |
 
 ### Sync pipelines
 
-Define multi-step operations (migrations, deployments, environment syncs) as a simple YAML checklist. Claude Code walks each step with you — executing commands, gating destructive steps for human approval, and diagnosing failures using cross-step context and codebase knowledge.
-
-In your terminal:
+Define migrations, deployments, and environment syncs as a YAML checklist. Claude Code walks each step with you — executing commands, gating destructive steps for human approval, and diagnosing failures using cross-step context and codebase knowledge.
 
 ```bash
-pw sync init              # scaffold a starter sync.yml
+pw sync init              # scaffold planwise/sync.yml
 ```
-
-Edit `planwise/sync.yml` to define your steps:
 
 ```yaml
 name: dev-to-prod
@@ -206,101 +198,96 @@ Then, in Claude Code:
 "run the sync pipeline"
 ```
 
-The agent checks preconditions between steps (e.g., won't run `terraform apply` if the migration was skipped), pattern-matches known failures, and proposes fixes by reading your codebase — not just the error output.
+The agent checks preconditions between steps (won't `terraform apply` if the migration was skipped), pattern-matches known failures, and proposes fixes by reading your codebase — not just the error output.
+
+---
 
 ## Rulesets
 
-Rulesets inject language-specific and domain-specific rules into coding workflows (`task`, `implement`, `test`, `optimize`). Planning workflows (`brief`, `plan`, `memo`, `bug`) don't receive rules — they don't write code.
-
-Set project defaults at init:
+Rulesets inject language- and domain-specific rules into coding workflows (`task`, `implement`, `test`, `optimize`). Planning workflows (`brief`, `plan`, `memo`, `bug`) don't receive rules — they don't write code.
 
 ```bash
-pw init --project "myapp" --prefix "MA" --rules python
-pw init --rules design              # add a ruleset to an existing project
+pw init --project "myapp" --prefix "MA" --rules python       # default at init
+pw init --rules design                                       # add to existing project
+pw run implement user-auth --rules python,design             # override per run
 ```
 
-Override per run:
-
-```bash
-pw run implement user-auth --rules python,design
-```
-
-Override replaces the project defaults for that invocation. A `base` ruleset with universal coding rules always injects automatically when any ruleset is active.
-
-Planwise ships with built-in rulesets. The `$RULES` marker in workflow templates is replaced with the combined ruleset content at runtime.
+A `base` ruleset with universal coding rules always injects when any ruleset is active. The `$RULES` marker in templates is replaced at runtime.
 
 | Ruleset | Scope |
 |---------|-------|
-| `base` | Universal coding rules (always injected when any ruleset is active) |
+| `base` | Universal coding rules (always injected) |
 | `python` | Python-specific rules |
-| `ts-web` | TypeScript/JavaScript web rules (React) |
-| `rust-web` | Rust web rules (Tokio, Axum) |
-| `design` | Software architecture and design principles (SOLID, DDD, Hexagonal) |
+| `ts-web` | TypeScript/JavaScript (React) |
+| `rust-web` | Rust web (Tokio, Axum) |
+| `design` | SOLID, DDD, Hexagonal |
 | `finance` | Financial engineering (idempotency, precision, distributed consistency) |
-| `ui-ux` | UI/UX design guidelines (layout, typography, color, forms) |
+| `ui-ux` | UI/UX design guidelines |
+
+---
 
 ## Layouts
 
-Layouts are project-shape scaffolds — the package/directory structure for a given project type — appended directly to `CLAUDE.md` as a `<layout>...</layout>` section. Unlike rulesets (which carry coding behavior and are runtime-injected into workflow templates), layouts only describe *where code lives*. Once seeded, the section is yours to edit: re-running `pw init --layout X` skips when a `<layout>` block is already present, so your changes are never overwritten.
+Layouts are project-shape scaffolds — the package/directory structure — appended to `CLAUDE.md` inside a `<layout>...</layout>` block. Unlike rulesets (runtime-injected coding behavior), layouts give the agent **always-on structural orientation**: which directory holds domain logic, where adapters live, etc.
 
-Layouts complement rulesets. Rulesets cover coding behavior (idioms, forbidden libs, framework conventions) scoped to coding workflows. Layouts give the agent always-on structural orientation (which directory holds the domain logic, where adapters live, etc.) without polluting planning workflows or general chat with code rules.
-
-Seeding is a single write: the layout content is appended to `CLAUDE.md` inside a `<layout>...</layout>` block. If `CLAUDE.md` is missing or lacks the planwise coding-standards block, it's seeded too — so `--layout` alone produces a complete, standalone `CLAUDE.md`.
-
-Set at init (or add later):
+Once seeded, the block is yours — re-running `pw init --layout X` skips when a `<layout>` block already exists.
 
 ```bash
 pw init --project "myapp" --prefix "MA" --agent claude --layout python-web
-pw init --layout python-web              # seed a layout into an existing project
+pw init --layout python-web              # add to existing project
 ```
 
 | Layout | Scope |
 |--------|-------|
 | `python-web` | Python web API (hexagonal: `domain/`, `adapters/`, `api/`, `core/`) |
 
+---
+
+## Parallel agents
+
+Parallelism runs at two levels, both on **jj workspaces** (jj's worktree equivalent, backed by a shared repo + operation log):
+
+- **Multiple features concurrently.** Spin up separate Claude Code sessions, each in its own workspace on its own feature bookmark. A per-feature lock check prevents collisions; the shared `planwise/` directory keeps issue state consistent. Stale working copies reconcile via `jj workspace update-stale`.
+- **Multiple sub-features within a feature.** When the dep graph surfaces independent sub-features, `implement` dispatches them concurrently — one subagent per sub-feature, each in an isolated workspace. All sub-feature heads then merge into the feature change in a **single n-way merge**. Conflicts are first-class data in the change graph (not fatal), resolved in-place during the same `/implement` phase. No work discarded, no sequential fallback.
+
+No manual workspace setup. Workflows detect non-default workspaces and adjust (skip bookmark creation, relax multi-feature lock check).
+
+---
+
 ## Storage
 
-- Each project gets a `planwise/` directory with markdown files organized by status
-- Issues use YAML frontmatter for metadata, markdown body for details
-- Dependencies form a DAG — `ready` shows what's unblocked, `blocked` shows what's waiting
-- File-based storage means everything is version-controllable and diffable
+- `planwise/` directory, markdown files organized by status
+- Issues: YAML frontmatter + markdown body
+- Dependencies form a DAG — `pw ready` shows what's unblocked, `pw blocked` shows what's waiting
+- File-based = version-controllable, diffable, greppable, LLM-readable
 
-## Parallel execution
-
-Parallelism operates at two levels, both using **jj workspaces** (jj's equivalent of git worktrees, backed by a single shared repo and the operation log):
-
-- **Multiple features concurrently.** Launch separate Claude Code sessions, each implementing a different feature in its own jj workspace on its own feature bookmark. The per-feature lock check ensures no two sessions work on the same feature, while the shared `planwise/` directory keeps issue state consistent across workspaces. Stale working copies (caused by another workspace rewriting a shared change) are reconciled with `jj workspace update-stale`.
-- **Multiple sub-features within a feature.** When the dependency graph surfaces independent sub-features (no mutual deps), the `implement` workflow dispatches them concurrently — one subagent per sub-feature, each in an isolated jj workspace. After all complete, all sub-feature heads merge into the feature change in a **single n-way merge**. Conflicts are recorded inline as first-class data in the change graph (not a fatal error) and are resolved in-place by Claude during the same `/implement` phase — no work is discarded, no sequential re-implementation fallback.
-
-No manual workspace setup needed. The workflow detects whether it's running in a non-default workspace and adjusts its behavior (skips bookmark creation, relaxes the multi-feature lock check).
+---
 
 ## CLI reference
 
-`pw` (or `planwise`) is the CLI. All commands output JSON by default, text with `-t`.
+`pw` (or `planwise`). JSON output by default, text with `-t`.
 
 | Command | Description |
 |---------|-------------|
-| `init --project "name" --prefix "XX" [--agent claude] [--rules python] [--layout python-web]` | Initialize planning (re-run with `--agent`/`--rules`/`--layout` to update) |
-| `create <feature\|sub-feature\|task\|uat\|bug> "title"` | Create an issue (body from stdin) |
+| `init --project "name" --prefix "XX" [--agent claude] [--rules python] [--layout python-web]` | Initialize planning (re-run with flags to update) |
+| `create <feature\|sub-feature\|task\|uat\|bug> "title"` | Create issue (body via stdin) |
 | `view <slug>` | View an issue |
 | `edit <slug> --title/--body/--label/--agent` | Edit an issue |
-| `status <slug> <status>` | Move issue to backlog/ready/in-progress/in-review/done |
+| `status <slug> <status>` | Move to backlog/ready/in-progress/in-review/done |
 | `close <slug> --reason "..."` | Close an issue |
-| `list [type] [--status S] [--children-of slug]` | List issues with filters |
-| `dep add/remove/list <slug> [dep-slug]` | Manage dependencies (with cycle detection) |
-| `ready [--children-of slug]` | Issues with all dependencies satisfied |
-| `blocked [--children-of slug]` | Issues with unsatisfied dependencies |
+| `list [type] [--status S] [--children-of slug]` | List with filters |
+| `dep add/remove/list <slug> [dep-slug]` | Manage deps (cycle detection) |
+| `ready [--children-of slug]` | Issues with all deps satisfied |
+| `blocked [--children-of slug]` | Issues with unsatisfied deps |
 | `next` | Pick the next issue to work on |
 | `search "query"` | Search issues |
-| `note <slug> "text"` | Add a timestamped note |
+| `note <slug> "text"` | Add timestamped note |
 | `stats` | Counts by status and type |
-| `verify [--fix]` | Check integrity, optionally auto-fix |
-| `run <workflow> [args...] [--list] [--rules name]` | Output a workflow template (rulesets and `$ARGUMENTS` replaced) |
-| `sync init [--pipeline path]` | Scaffold a starter `sync.yml` pipeline config |
-| `sync show [--pipeline path]` | Display pipeline steps, gates, and current state |
-| `sync exec <step> [--pipeline path] [--force]` | Execute a single pipeline step |
-| `sync state [step]` | Show pipeline execution state |
-| `sync reset [step] [--all]` | Reset step state (one step or all) |
+| `verify [--fix]` | Check integrity, auto-fix |
+| `run <workflow> [args...] [--list] [--rules name]` | Output workflow template |
+| `sync init / show / exec / state / reset` | Multi-step pipeline ops |
+
+---
 
 ## License
 
