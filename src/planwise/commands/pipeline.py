@@ -1,13 +1,23 @@
-"""Pipeline commands: internal helpers called by workflow skills and /next."""
+"""Pipeline commands: internal helpers called by workflow skills and /next.
+
+State model (see pipeline/state.py): per-slug files under `<planning_dir>/.pipelines/`.
+Creation phases (plan/brief/bug) write no state — /next resolves their candidates
+from the issue store via `find_latest_creation_candidate`.
+"""
 
 from __future__ import annotations
 
 import click
 
-from planwise.pipeline import CREATION_PHASES, PHASE_CHAIN, SLUG_CONSUMING_PHASES
-from planwise.pipeline.slug import list_new_candidates
-from planwise.pipeline.state import PipelineState, clear_state, read_state, write_state
-from planwise.store import get_store
+from planwise.pipeline import PHASE_CHAIN, SLUG_CONSUMING_PHASES
+from planwise.pipeline.slug import find_latest_creation_candidate
+from planwise.pipeline.state import (
+    delete_slug_state,
+    list_slug_states,
+    read_slug_state,
+    write_slug_state,
+)
+from planwise.store import MetaStore, get_store
 from planwise.workflows import expand_workflow
 
 
@@ -29,7 +39,12 @@ def register(cli: click.Group) -> None:
 @click.argument("args", nargs=-1)
 @click.pass_context
 def pipeline_enter(ctx: click.Context, phase: str, args: tuple[str, ...]) -> None:
-    """Record that a workflow skill has started. Called from generated SKILL.md files."""
+    """Record that a workflow skill has started. Called from generated SKILL.md files.
+
+    Slug-consuming phases write a per-slug state file so `/next` can advance via
+    `PHASE_CHAIN`. Creation phases are a no-op — their candidates are resolved from
+    the issue store at `/next` time.
+    """
     if phase not in PHASE_CHAIN:
         return
 
@@ -37,137 +52,103 @@ def pipeline_enter(ctx: click.Context, phase: str, args: tuple[str, ...]) -> Non
     if not store.planning_dir.is_dir():
         return
 
-    existing = read_state(store.planning_dir) or {}
-
-    slug: str | None = existing.get("slug")
     if phase in SLUG_CONSUMING_PHASES and args:
-        slug = args[0]
-
-    snapshot: list[str] = []
-    if phase in CREATION_PHASES:
-        if existing.get("phase") in CREATION_PHASES:
-            snapshot = list(existing.get("snapshot", []))
-        else:
-            snapshot = store.list_slugs()
-
-    state: PipelineState = {"phase": phase, "slug": slug, "snapshot": snapshot}
-    write_state(store.planning_dir, state)
+        write_slug_state(store.planning_dir, args[0], {"phase": phase})
 
 
 @click.command("pipeline-next", hidden=True)
 @click.argument("chosen_slug", required=False)
 @click.pass_context
 def pipeline_next(ctx: click.Context, chosen_slug: str | None) -> None:
-    """Output the next phase's expanded workflow, advancing pipeline state.
+    """Output the next phase's expanded workflow, advancing per-slug state.
 
     Invoked by the `/next` skill. Run `/clear` first for a fresh context; this
-    command's stdout seeds the cleared conversation with the next phase's
-    workflow.
+    command's stdout seeds the cleared conversation with the next phase's workflow.
 
-    When the current phase is a creation phase (plan/brief) and multiple new
-    issues were created since the planning session began, this command prints
-    the candidate list and exits without advancing. The caller re-runs as
-    `/next <slug>` to pick a specific candidate.
+    Resolution order:
+    - Explicit slug: advance that slug (via its state file if one exists, else
+      treat as a freshly-created creation candidate).
+    - No slug: pick the most recently updated slug-consuming pipeline, or fall
+      back to the most recently created `ready` feature/task/bug.
     """
     store = get_store(ctx)
     store.require()
 
-    state = read_state(store.planning_dir)
-    if not state:
-        raise click.UsageError(
-            "No active pipeline. Start with /plan, /brief, /implement, "
-            "/test, /optimize, /memo, or /task first."
-        )
-
-    current = state.get("phase")
-    if not current:
-        raise click.UsageError("Pipeline state is corrupted (missing phase).")
-
-    if current in CREATION_PHASES:
-        _advance_from_creation(ctx, store, state, current, chosen_slug)
-        return
-
-    _advance_from_slug_phase(ctx, store, state, current)
-
-
-def _advance_from_creation(
-    ctx: click.Context,
-    store,
-    state: PipelineState,
-    current: str,
-    chosen_slug: str | None,
-) -> None:
-    """Handle /next when the current phase is `plan` or `brief`."""
-    before = set(state.get("snapshot", []))
-    after = set(store.list_slugs())
-    candidates = list_new_candidates(before, after, store)
-
-    if not candidates:
-        raise click.UsageError(
-            f"Phase '{current}' did not create any new feature or task issues. "
-            "Nothing to advance to."
-        )
-
     if chosen_slug is not None:
-        match = next((c for c in candidates if c[0] == chosen_slug), None)
-        if match is None:
-            options = ", ".join(s for s, _ in candidates)
-            raise click.UsageError(
-                f"'{chosen_slug}' is not in the candidate list. Options: {options}"
-            )
-        slug, issue_type = match
-    elif len(candidates) == 1:
-        slug, issue_type = candidates[0]
-    else:
-        click.echo("Multiple issues created during this planning session:")
-        for s, t in candidates:
-            click.echo(f"  [{t:<7}] {s}")
-        click.echo()
-        click.echo("Re-run as: /next <slug>  to pick one.")
+        state = read_slug_state(store.planning_dir, chosen_slug)
+        if state and state.get("phase"):
+            _advance_slug_consuming(ctx, store, chosen_slug, state["phase"])
+            return
+        _advance_from_issue_type(ctx, store, chosen_slug)
         return
 
-    next_phase = _TYPE_TO_NEXT_PHASE[issue_type]
+    states = list_slug_states(store.planning_dir)
+    if states:
+        slug, state = max(states, key=lambda p: p[1].get("updated_at", ""))
+        phase = state.get("phase")
+        if not phase:
+            raise click.UsageError(
+                f"Pipeline state for '{slug}' is corrupted (missing phase)."
+            )
+        _advance_slug_consuming(ctx, store, slug, phase)
+        return
+
+    slug = find_latest_creation_candidate(store)
+    if slug is None:
+        raise click.UsageError(
+            "No active pipeline and no ready feature/task/bug issues to advance. "
+            "Start with /plan, /brief, /bug, /implement, /test, /optimize, /memo, or /task."
+        )
+    _advance_from_issue_type(ctx, store, slug)
+
+
+def _advance_slug_consuming(
+    ctx: click.Context,
+    store: MetaStore,
+    slug: str,
+    current_phase: str,
+) -> None:
+    """Walk PHASE_CHAIN for a slug already in flight through a slug-consuming phase."""
+    next_phase = PHASE_CHAIN.get(current_phase)
+    if next_phase is None:
+        click.echo(f"Pipeline complete after '{current_phase}' for #{slug}.")
+        delete_slug_state(store.planning_dir, slug)
+        return
     _emit_next_phase(ctx, store, next_phase, slug)
 
 
-def _advance_from_slug_phase(
+def _advance_from_issue_type(
     ctx: click.Context,
-    store,
-    state: PipelineState,
-    current: str,
+    store: MetaStore,
+    slug: str,
 ) -> None:
-    """Handle /next when the current phase is slug-consuming (implement/test/etc.)."""
-    next_phase = PHASE_CHAIN.get(current)
+    """Advance a slug that has no in-flight state by mapping its issue type to a phase."""
+    issue, _body = store.require_issue(slug)
+    issue_type = issue.get("type")
+    next_phase = _TYPE_TO_NEXT_PHASE.get(issue_type or "")
     if next_phase is None:
-        click.echo(f"Pipeline complete after '{current}'. Nothing to advance to.")
-        clear_state(store.planning_dir)
-        return
-
-    slug = state.get("slug")
-    if next_phase in SLUG_CONSUMING_PHASES and not slug:
         raise click.UsageError(
-            f"Cannot advance to '{next_phase}': no slug available in pipeline state."
+            f"Issue #{slug} has type '{issue_type}' which has no next phase. "
+            "Only feature, task, and bug issues can start a pipeline."
         )
-    _emit_next_phase(ctx, store, next_phase, slug or "")
+    _emit_next_phase(ctx, store, next_phase, slug)
 
 
 def _emit_next_phase(
     ctx: click.Context,
-    store,
+    store: MetaStore,
     next_phase: str,
     slug: str,
 ) -> None:
-    """Expand the next phase's workflow, update state, and print to stdout."""
+    """Expand the next phase's workflow, update per-slug state, and print to stdout."""
     rule_names = list(store.get_config("rules", []) or [])
     content = expand_workflow(next_phase, slug, rule_names)
     if content is None:
         raise click.UsageError(f"Workflow '{next_phase}' not found.")
 
-    new_state: PipelineState = {
-        "phase": next_phase,
-        "slug": slug or None,
-        "snapshot": [],
-    }
-    write_state(store.planning_dir, new_state)
+    if next_phase in SLUG_CONSUMING_PHASES and slug:
+        write_slug_state(store.planning_dir, slug, {"phase": next_phase})
+    elif slug:
+        delete_slug_state(store.planning_dir, slug)
 
     click.echo(content)

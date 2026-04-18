@@ -1,33 +1,30 @@
-"""Candidate detection: find new feature/task issues created during a phase."""
+"""Candidate resolution: find the most recently created advanceable issue."""
 
 from __future__ import annotations
 
 from planwise.store import MetaStore
 
 
-def _issue_type(store: MetaStore, slug: str) -> str | None:
-    """Return the `type` field of an issue, or None if not readable."""
-    result = store.read_issue(slug)
-    if result is None:
-        return None
-    issue, _body = result
-    return issue.get("type")
+_ADVANCEABLE_TYPES: frozenset[str] = frozenset({"feature", "task", "bug"})
+_CANDIDATE_STATUS: str = "ready"
 
 
-def list_new_candidates(
-    before: set[str],
-    after: set[str],
-    store: MetaStore,
-    accepted_types: frozenset[str] = frozenset({"feature", "task", "bug"}),
-) -> list[tuple[str, str]]:
-    """Return [(slug, type), ...] for issues in `after - before` matching `accepted_types`.
+def find_latest_creation_candidate(store: MetaStore) -> str | None:
+    """Return the slug of the most recently created `ready` feature/task/bug, or None.
 
-    Sorted deterministically by slug for stable output ordering.
+    Used by `/next` when no slug is given and no slug-consuming pipeline is in flight —
+    it resolves to "whatever the user most recently planned/briefed/triaged."
     """
-    new_slugs = after - before
+    issues = store.read_all()
     candidates: list[tuple[str, str]] = []
-    for slug in sorted(new_slugs):
-        issue_type = _issue_type(store, slug)
-        if issue_type in accepted_types:
-            candidates.append((slug, issue_type))
-    return candidates
+    for slug, issue in issues.items():
+        if issue.get("type") not in _ADVANCEABLE_TYPES:
+            continue
+        if issue.get("status") != _CANDIDATE_STATUS:
+            continue
+        created = issue.get("created", "")
+        candidates.append((created, slug))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
