@@ -4,9 +4,16 @@ description: "Distill a completed feature into the project knowledge base"
 
 # Memo — Knowledge Base Update
 
-Distill a completed feature's learnings into the project knowledge base. Runs after a feature is done. The output is a domain-scoped knowledge file in `planwise/knowledge/` that serves both humans and agents as the current truth about that domain.
+Distill a completed feature's learnings into the project knowledge base. Runs after a feature is done.
 
-The knowledge base is a living artifact — refactored like code, not archived like documents. Each file must pass the **cold start test**: an agent or developer reading only this file can act correctly in the domain without chasing other sources.
+Artifacts maintained per run:
+- `planwise/knowledge/<domain>.md` — narrative knowledge for humans
+- `planwise/knowledge/<domain>.jsonl` — typed records for agents (one entry per line)
+- `planwise/knowledge/<domain>.eval.md` — developer questions used to measure KB quality
+- `planwise/knowledge/INDEX.md` — grep-optimized domain map
+- `planwise/knowledge/_lessons.md` — planning lessons (distinct from domain truth)
+
+The knowledge base is a living artifact — refactored like code, not archived like documents. Each domain file must pass the **cold start test**: an agent or developer reading only this file can act correctly in the domain without chasing other sources. Phase 4.5 verifies this with an isolated reader.
 
 ## Target: Feature $ARGUMENTS
 
@@ -22,9 +29,11 @@ Every entry in the knowledge base serves two audiences simultaneously: a develop
 
 **Concrete over abstract.** Name specific files, functions, types, error messages. "The payment webhook handler validates idempotency keys" beats "The system ensures idempotent processing." If an entry could apply to any codebase, it's too abstract.
 
-**Signal salience.** Mark load-bearing entries `[critical]` — these are decisions, constraints, or gotchas where getting it wrong causes a production incident, data loss, or security vulnerability. Most entries are unmarked (normal salience). Use `[critical]` sparingly — if more than ~20% of entries are critical, the signal is diluted.
+**Signal salience.** Mark load-bearing entries `[critical]` — these are decisions, constraints, or gotchas where getting it wrong causes a production incident, data loss, or security vulnerability. Most entries are unmarked. Use `[critical]` sparingly — if more than ~20% of entries are critical, the signal is diluted.
 
-**Link entries across sections.** When a decision exists because of a constraint, or a pattern exists to avoid a gotcha, say so inline: "Motivated by: *[constraint name]*" or "Prevents: *[gotcha name]*." This turns a flat list into a knowledge graph the reader can traverse.
+**Link entries across sections.** When a decision exists because of a constraint, or a pattern exists to avoid a gotcha, say so inline: "Motivated by: *[constraint name]*" or "Prevents: *[gotcha name]*." Phase 5.5 enforces back-references automatically — if you name a target, it must exist.
+
+**Provenance.** Every entry carries a trailing `source: <commit-sha-short> | <issue-id>` line. The source is the evidence backing the entry. Verification becomes deterministic: re-read the source, check whether the entry still reflects it. Entries without a source are rejected.
 
 ## Phase 1: Validate readiness
 
@@ -37,467 +46,298 @@ planwise view $ARGUMENTS --field status
 - Type must be `feature`. If not → stop: `$ARGUMENTS is not a feature.`
 - Status must be `done` or `in-review`. If `in-review`, warn: `Feature $ARGUMENTS is in-review, not done. Proceeding — knowledge may be incomplete.` Any other status → stop: `Feature $ARGUMENTS is not complete (status: <status>). Finish the feature first.`
 
+## Phase 1.5: Scale gate
+
+Right-size the pipeline to the feature. Read once:
+
+```bash
+planwise list --children-of $ARGUMENTS --type sub-feature
+planwise list --children-of $ARGUMENTS --type bug
+jj log -r 'description(glob:"optimize:*") & dev@origin..@' -T builtin_log_oneline
+```
+
+Classify:
+
+- **Trivial** — 1 sub-feature, 0 bug sub-features, 0 optimize commits. Run: single combined-lens subagent (Phase 3 folded to 1 call), skip Phase 3.5 sweep, skip Phase 6 rewrite reviewer. Phases 4, 4.5, 5, 5.5, 6 (signal collection), 6.5, 7 still run.
+- **Standard** — 2-6 sub-features. Run full pipeline.
+- **Large** — 7+ sub-features OR touches >1 domain. Run full pipeline + per-domain split in Phase 4 Step 4.
+
+Record the classification; Phase 7 reports it.
+
 ## Phase 2: Gather sources
 
-Collect all raw material — both the feature's artifacts and the existing knowledge base state.
+Collect the feature's artifacts and the existing knowledge base state.
 
-### Step 1: Read the feature and all sub-features
+### Step 1: Read the feature and sub-features
 
 ```bash
 planwise view $ARGUMENTS
 planwise list --children-of $ARGUMENTS --type sub-feature
 planwise list --children-of $ARGUMENTS --type bug
 planwise list --children-of $ARGUMENTS --type uat
+planwise view <sub-feature-id>    # for each
 ```
 
-Read the full body of each sub-feature:
-```bash
-planwise view <sub-feature-id>
-```
+Record: feature title, user story, success criteria, scope, assumptions & risks; per sub-feature title + requirements + implementation notes + acceptance criteria + notes; for bugs: what broke, root cause, fix; for UAT: what was tested, pass/fail.
 
-Record:
-- Feature title, user story, success criteria, scope, assumptions & risks
-- Per sub-feature: title, requirements, implementation notes, acceptance criteria, notes
-- Bug sub-features: what broke, root cause, fix approach
-- UAT: what was tested, what passed/failed
+### Step 2: Walk jj history for the feature change
 
-### Step 2: Read jj history for the feature change
-
-Identify the feature bookmark and walk the change graph from `dev@origin`:
 ```bash
 jj bookmark list --all-remotes | grep -E '^(feat|fix)/'
 jj log -r 'dev@origin..@' -T builtin_log_oneline --stat
 ```
 
-If the bookmark has already been merged into `dev`, walk the ancestry from a merge change instead:
+If the bookmark is already merged into `dev`:
+
 ```bash
 jj log -r 'description(glob:"*'"$ARGUMENTS"'*") & ::dev@origin & merges()' -T builtin_log_oneline --stat
 ```
 
-Extract:
-- Commit descriptions (encode decisions)
-- Abandoned or reverted changes (encode gotchas — surface via `jj op log` if needed)
-- Optimize commits (prefixed `optimize:`) — what was fixed/evolved post-implementation
+Extract commit SHAs (needed for `source:` fields), commit descriptions (encode decisions), reverts and abandons (encode gotchas), and `optimize:` commits (what was fixed post-implementation).
 
 ### Step 3: Read optimize and test artifacts
 
 ```bash
 jj log -r 'description(glob:"optimize:*") & dev@origin..@' -T builtin_log_oneline
 jj log -r 'description(glob:"test:*") & dev@origin..@' -T builtin_log_oneline
+planwise view <sub-feature-id>    # check notes for optimize/test reports
 ```
 
-Check sub-feature notes for optimize/test reports:
-```bash
-planwise view <sub-feature-id>
-```
-
-Record:
-- Optimize verdict (converged/stuck/stopped), iteration count, what was fixed vs remaining
-- Test findings: bugs found, crashes, what held up
-- Dimensions that scored well vs poorly
+Record optimize verdict (converged/stuck/stopped) + iteration count, test findings, dimensions that scored poorly.
 
 ### Step 3b: Mine the jj operation log for discarded work
 
-**This is pure knowledge-base signal that git cannot provide.** jj's operation log preserves every repo mutation — including changes that were abandoned, rewritten, or reverted during implementation. These are exactly where gotchas live: approaches that were tried and didn't work.
-
-List recent operations with their descriptions:
+**Pure knowledge-base signal that git cannot provide.** jj's op log preserves every repo mutation — including changes abandoned, rewritten, or reverted during implementation. These are where gotchas live.
 
 ```bash
 jj op log --limit 200 --no-graph -T 'id.short() ++ " " ++ description ++ "\n"'
+jj op log --limit 200 --patch     # read-only diff per op
 ```
 
-Inspect each operation's effect on the repo — the `--patch` flag shows the diff introduced or reverted by each op, without mutating state:
+Scope to this feature's timeline. Look for `abandon` (discarded approaches), `rewrite`/`squash`/`rebase` (rework, conflict hotspots), `restore` (rollbacks). Multiple ops on the same change-id signal repeated attempts.
+
+Read abandoned change content directly while it's still indexed:
 
 ```bash
-jj op log --limit 200 --patch
+jj show <abandoned-change-id>
 ```
 
-Look specifically for operations relevant to this feature's timeline:
-- `abandon` operations — a change was thrown away. The op's patch shows what was discarded.
-- `rewrite` / `squash` / `rebase` operations — indicate a merge or amend; conflict markers in the patch indicate manual resolution was needed.
-- `restore` operations — indicate a rollback (e.g., from `/optimize` baseline).
-- Multiple ops on the same change-id — signal rework; read the change's final state plus the intermediate ops.
+Do **not** use `jj op restore` as preview — it mutates state. `jj op log --patch` is the read-only path.
 
-For any abandoned change whose content you need to read in full, jj still indexes it by change-id until garbage collection:
-
-```bash
-jj show <abandoned-change-id>       # succeeds while the change is in the op-log and not yet gc'd
-```
-
-Do **not** use `jj op restore` as a preview mechanism — it mutates repo state. `jj op log --patch` is the read-only path.
-
-Record:
-- **Abandoned approaches** — what was tried, why it was thrown away → feeds *Gotchas* ("approach X fails because Y, prefer Z")
-- **Conflict hotspots** — files that triggered merge conflicts during sub-feature integration → feeds *Gotchas* and *Constraints* ("changes to <file> must consider <invariant>")
-- **Rework patterns** — sub-features that required >1 commit cycle → feeds *Decisions* (the final approach, with rejected alternatives)
+Record: abandoned approaches → *Gotchas* and *Rejected*; conflict hotspots → *Gotchas* and *Constraints*; rework patterns → *Decisions* (final approach with rejected alternatives).
 
 ### Step 4: Identify target domain(s) and read existing knowledge
 
-Determine which domain(s) this feature touches. A domain maps to a bounded context or major subsystem (e.g., `auth`, `payments`, `ingestion`). Most features touch one domain; some touch two. More than two suggests the feature was too broad — pick the primary.
+A domain maps to a bounded context (e.g., `auth`, `payments`, `ingestion`). Most features touch one domain; some touch two. More than two suggests the feature was too broad — pick the primary.
 
 ```bash
 ls planwise/knowledge/
+cat planwise/knowledge/<domain>.md       # if exists
+cat planwise/knowledge/<domain>.eval.md  # if exists
 ```
 
-If a knowledge file already exists for the target domain, read it in full — subagents need current state to merge against.
-
-```bash
-cat planwise/knowledge/<domain>.md
-```
+Subagents need current state to merge against.
 
 ## Phase 3: Distill and merge
 
-Launch **3 subagents in one message** — each analyzes the gathered material through a different lens. If an existing knowledge file was found, each subagent receives it alongside the feature material and produces **merged** output.
+Launch subagents in one message. **Trivial** scale: one combined subagent produces all sections. **Standard/Large** scale: three parallel subagents as below. Every subagent receives the Writing Principles (see top of this file) — reject output that violates them.
 
-Every subagent receives the Writing Principles (see top of this file) as part of its prompt. Every entry must follow these principles — reject subagent output that violates them.
+### Merge protocol (all subagents)
 
-### Merge protocol
+1. **Detect contradictions.** For each existing entry, compare against the feature's evidence. If contradicted (different approach chosen, constraint relaxed, gotcha resolved), flag `[SUPERSEDED]` with a one-line reason.
+2. **Keep** entries untouched by this feature.
+3. **Update** entries where this feature adds nuance or new evidence — rewrite, don't append a note. Update the `source:` to reflect the newer evidence.
+4. **Remove** entries the feature made obsolete (old version lives in git).
+5. **Add** new entries. Every new entry must include `source: <sha-short> | <issue-id>`.
 
-Each subagent follows the same merge logic when existing knowledge is present:
+When uncertain whether an existing entry is still valid, keep it and flag `[VERIFY]` — Phase 4 resolves these.
 
-1. **Detect contradictions.** For each existing entry, compare against the feature's evidence. If the feature contradicts an existing entry (different approach chosen, constraint relaxed, gotcha resolved), flag it explicitly: `[SUPERSEDED]` with a one-line reason.
-2. **Keep** entries that remain valid and untouched by this feature.
-3. **Update** entries where this feature adds nuance, changes scope, or provides new evidence. Rewrite the entry — don't append a note.
-4. **Remove** entries the feature made obsolete (the old version lives in git history). List removals in the subagent output so the report can track them.
-5. **Add** new entries from this feature.
-
-When in doubt about whether an existing entry is still valid, keep it and flag: `[VERIFY]` — Phase 4 resolves these.
-
-### Subagent 1: Architecture, Decisions & Patterns
+### Subagent 1: Architecture, Decisions, Patterns, Rejected
 
 ```
 You are writing for a project knowledge base that serves both human developers and AI agents.
-Follow these writing principles strictly:
-- Density without compression: every sentence carries information, no filler, but don't sacrifice clarity for brevity
-- Evergreen language: present tense, no temporal references, no feature-specific framing
-- Self-contained entries: each entry stands alone with its rationale inline
-- Concrete over abstract: name files, functions, types — not vague system descriptions
-- Mark load-bearing entries [critical] (production incidents, data loss, security if wrong)
-- Link to other sections when a decision is motivated by a constraint or prevents a gotcha
+Follow the Writing Principles strictly: density, evergreen language, self-contained entries, concrete over abstract, [critical] sparingly, cross-links, provenance on every new entry.
 
 Feature: [title, user story, scope]
-Sub-issues: [titles + implementation notes for each]
-Git log: [commit messages, file change summary]
+Sub-issues: [titles + implementation notes]
+Git log: [commit messages + SHAs + file changes]
 Bug fixes: [what broke and why]
-Existing knowledge (if any): [full content of current domain file's 1. Architecture, 2. Decisions, and 3. Patterns sections]
+Abandoned / rejected approaches (from jj op log): [summary]
+Existing knowledge (if any): [full sections 1. Architecture, 2. Decisions, 3. Patterns, 7. Rejected]
 
-Follow the merge protocol: detect contradictions → keep → update → remove → add.
-List any [SUPERSEDED] or [VERIFY] flags with reasons.
+Follow the merge protocol. List [SUPERSEDED] or [VERIFY] flags with reasons.
 
-Produce merged output for three sections:
+Produce merged output for four sections:
 
 ## 1. Architecture
-How this domain works now — the mental model a developer or agent needs before touching this code. Structure as:
-- One paragraph: what the domain does and how data flows through it
-- Key components: name each with its file path and responsibility (one line each)
-- Integration points: how this domain connects to other domains at the code level
-
-Write for someone who has never seen this codebase. After reading this section, they should know where to look and what each piece does.
-
-Example of a good Architecture section:
-> The billing domain processes subscription changes and generates invoices. Events flow from the subscription service (`src/billing/events.py`) through the invoice generator (`src/billing/invoice.py`) to the payment gateway adapter (`src/billing/gateway.py`).
->
-> - **SubscriptionEngine** (`src/billing/engine.py`) — orchestrates plan changes, proration, and trial logic
-> - **InvoiceGenerator** (`src/billing/invoice.py`) — computes line items from subscription deltas
-> - **GatewayAdapter** (`src/billing/gateway.py`) — abstracts Stripe/Braintree behind a common interface
->
-> Integration: receives `PlanChanged` events from the subscription domain; emits `InvoiceCreated` events consumed by the notification domain.
+How this domain works — the mental model a reader needs before touching this code.
+- One paragraph: what the domain does and how data flows through it.
+- Key components: name each with its file path and responsibility.
+- Integration points: how this domain connects to others at the code level.
 
 ## 2. Decisions
-Why things are the way they are. Each entry explains what was chosen, what was rejected, and why — with enough context that a reader can evaluate whether the decision still holds.
+Why things are the way they are. Entry format:
+- **[Decision title]** — [What was chosen] over [what was rejected]. [Rationale: specific constraint or tradeoff]. [Consequence for future work]. Motivated by: *[constraint or gotcha name, if applicable]*. source: <sha> | <issue-id>
 
-Entry format:
-- **[Decision title]** — [What was chosen] over [what was rejected]. [Rationale: the specific constraint, requirement, or tradeoff that drove this choice]. [Consequence: what this means for future work in this domain]. Motivated by: *[constraint or gotcha name, if applicable]*.
-
-Example of a good decision entry:
-> - **Gateway abstraction over direct Stripe SDK** — The payment gateway uses an adapter interface (`GatewayPort`) rather than calling Stripe directly. The team evaluated direct SDK usage but chose abstraction because the contract requires supporting Braintree for EU customers by Q3. The adapter adds one layer of indirection but isolates all payment logic from provider-specific types. Motivated by: *multi-provider constraint*.
-
-Example of a bad decision entry (don't write like this):
-> - **Used adapter pattern** — Chose adapter over direct calls for flexibility.
-
-Only include decisions a future developer would benefit from knowing. Skip obvious or framework-default choices.
+Only include decisions a future developer would benefit from knowing. Skip framework-default choices.
 
 ## 3. Patterns
-Reusable approaches established or confirmed in this domain. Each entry describes when and why to apply the pattern, not just what it is.
+Reusable approaches established or confirmed. Entry format:
+- **[Pattern name]** — [What the pattern is and where it lives: @file_path]. [When to use: trigger condition]. [How it works: enough detail to apply]. Prevents: *[gotcha name, if applicable]*. source: <sha> | <issue-id>
 
-Entry format:
-- **[Pattern name]** — [What the pattern is and where it lives: @file_path]. [When to use: the trigger condition]. [How it works: enough detail to apply it correctly]. Prevents: *[gotcha name, if applicable]*.
+Only include patterns not already in CLAUDE.md or project rulesets.
 
-Example of a good pattern entry:
-> - **Idempotent webhook processing** — Every webhook handler in `src/billing/webhooks/` checks `IdempotencyStore.seen(event_id)` before processing. Apply this pattern to any new webhook endpoint. The store uses a 72-hour TTL Redis key — events replayed after 72 hours are reprocessed (acceptable per Stripe's replay semantics). Prevents: *duplicate invoice generation*.
+## 7. Rejected
+Approaches considered and deliberately not taken in this domain. Prevents future agents from re-proposing dead ends. Entry format:
+- **[Approach title]** — [What was considered]. [Why rejected: the specific constraint, cost, or failure that ruled it out]. [What it would look like if reconsidered: the condition that would flip the decision]. source: <sha> | <issue-id>
 
-Only include patterns not already documented in CLAUDE.md or project guidelines.
+Populate from: abandoned approaches in jj op log, reverted commits, decisions' "rejected alternatives", and options explicitly ruled out in scope or assumptions & risks. Skip trivial rejections (syntax choices, formatting).
 ```
 
 ### Subagent 2: Gotchas & Constraints
 
 ```
 You are writing for a project knowledge base that serves both human developers and AI agents.
-Follow these writing principles strictly:
-- Density without compression: every sentence carries information, no filler, but don't sacrifice clarity for brevity
-- Evergreen language: present tense, no temporal references, no feature-specific framing
-- Self-contained entries: each entry stands alone with its rationale inline
-- Concrete over abstract: name files, functions, types, error messages — not vague descriptions
-- Mark load-bearing entries [critical] (production incidents, data loss, security if wrong)
-- Link to other sections when a gotcha motivates a decision or pattern
+Follow the Writing Principles strictly.
 
-Feature: [title, scope, assumptions & risks from plan]
+Feature: [title, scope, assumptions & risks]
 Sub-issues: [titles + requirements]
-Bug fixes: [full bug descriptions and fixes]
+Bug fixes: [full descriptions and fixes]
 Optimize results: [what was fixed, what was evolved, remaining items]
 Test results: [bugs found, crashes, what held up]
-Git history: [reverts, multiple attempts at same file, optimize fix commits]
-Existing knowledge (if any): [full content of current domain file's 4. Gotchas and 5. Constraints sections]
+Git history: [reverts, multi-attempt commits, SHAs]
+Existing knowledge (if any): [full sections 4. Gotchas, 5. Constraints]
 
-Follow the merge protocol: detect contradictions → keep → update → remove → add.
-List any [SUPERSEDED] or [VERIFY] flags with reasons.
-
-Produce merged output for two sections:
+Follow the merge protocol. List [SUPERSEDED] or [VERIFY] flags.
 
 ## 4. Gotchas
-Things that will bite you in this domain — surprises, non-obvious failure modes, common mistakes. Prioritize gotchas that would trap a future developer working in this domain.
+Things that will bite you in this domain. Entry format:
+- **[Gotcha title]** — [Observable symptom]. [Root cause at the code level]. [How to avoid: specific prevention]. Motivated: *[decision name, if applicable]*. source: <sha> | <issue-id>
 
-Entry format:
-- **[Gotcha title]** — [What happens: the observable symptom]. [Why it happens: root cause at the code level]. [How to avoid: specific prevention, not generic advice]. Motivated: *[decision name, if this gotcha exists because of a design choice]*.
-
-Example of a good gotcha entry:
-> - **Webhook signature validation fails silently on replays** — Stripe replays use the original timestamp, but the signature validator in `src/billing/webhooks/verify.py` rejects timestamps older than 5 minutes. The handler returns 200 (to prevent Stripe retry storms) but drops the event. Check CloudWatch for `webhook.signature.stale` metrics if invoices appear missing. How to avoid: set `STRIPE_WEBHOOK_TOLERANCE=300` in env to match the replay window.
-
-Example of a bad gotcha entry (don't write like this):
-> - **Webhook issues** — Sometimes webhooks fail. Make sure to handle errors properly.
-
-For each existing gotcha, check: did this feature fix the root cause? If yes, remove the gotcha — the fix is in the code now. Don't keep warnings about problems that no longer exist.
+For each existing gotcha: did this feature fix the root cause? If yes, remove — the fix is in the code.
 
 ## 5. Constraints
-Invariants, performance bounds, security boundaries, and hard requirements. These are the rules that cannot be broken without consequences. Only include constraints backed by evidence from optimize/test results, explicit requirements, or production incidents.
-
-Entry format:
-- `[critical]` **[Constraint title]** — [What the constraint is: specific, measurable where possible]. [Why it exists: the requirement, regulation, or failure that established it]. [What breaks: concrete consequence of violation].
-
-Example of a good constraint entry:
-> - `[critical]` **Invoice generation latency < 500ms p99** — The invoice generation path from `SubscriptionChanged` event to `InvoiceCreated` event must complete within 500ms at p99. The downstream notification service has a 1s timeout on invoice events — exceeding 500ms causes notification delivery failures that surface as "missing receipt" support tickets. Measured via `invoice.generation.duration` metric in Datadog.
-
-Example of a bad constraint entry (don't write like this):
-> - **Must be fast** — Invoice generation should be performant.
+Invariants, performance bounds, security boundaries. Only include constraints backed by evidence (optimize/test results, explicit requirements, production incidents). Entry format:
+- `[critical]` **[Constraint title]** — [What the constraint is, measurable]. [Why it exists]. [What breaks on violation]. source: <sha> | <issue-id>
 ```
 
-### Subagent 3: Context & Connections
+### Subagent 3: Preamble & Connections
 
 ```
 You are writing for a project knowledge base that serves both human developers and AI agents.
-Follow these writing principles strictly:
-- Density without compression: every sentence carries information, no filler
-- Evergreen language: present tense, no temporal references, no feature-specific framing
-- Concrete over abstract: name specific modules, interfaces, data flows
+Follow the Writing Principles strictly.
 
 Feature: [title, user story, success criteria, scope]
 Sub-issues: [titles + dependencies]
 Files changed: [list from git]
-Existing knowledge (if any): [full content of current domain file's preamble and 6. Connections section]
+Existing knowledge (if any): [preamble and 6. Connections]
 
-Follow the merge protocol: detect contradictions → keep → update → remove → add.
-
-Produce merged output for two parts:
+Follow the merge protocol.
 
 ### Preamble
-2-3 sentences describing what this domain is, its role in the system, and the core abstraction it provides. Not what any feature did — what this domain IS. After reading the preamble, a developer should know whether their problem lives in this domain or elsewhere.
-
-Example of a good preamble:
-> The billing domain owns the lifecycle of subscriptions, invoices, and payment processing. It translates business events (plan changes, trials, cancellations) into financial records and coordinates with external payment providers through an adapter interface. All monetary calculations use `Decimal` types — no floats touch this domain.
-
-Example of a bad preamble (don't write like this):
-> This domain handles billing stuff. It was created to manage payments.
-
-If existing preamble is present, update only if this feature changed the domain's scope, role, or core abstraction.
+2-3 sentences describing what this domain is, its role in the system, and the core abstraction it provides. Not what any feature did — what this domain IS. Update only if this feature changed scope, role, or core abstraction.
 
 ## 6. Connections
-Map the domain's relationships to help `/plan` sessions understand ripple effects and blast radius.
+- **Depends on:** [Domains/services this domain calls, imports, or requires — name the interface or contract]
+- **Shared types:** [Types, schemas, or events crossing domain boundaries — only if misuse causes a bug grep alone wouldn't catch]
+- **Deferred work:** [Items explicitly deferred — remove anything completed by this or prior features]
 
-- **Depends on:** [Domains or services this domain calls, imports from, or requires — name the interface or contract]
-- **Shared types:** [Types, schemas, or events that cross domain boundaries — only include if misusing the type causes a bug that grep alone wouldn't reveal]
-- **Deferred work:** [Anything explicitly deferred or left as out-of-scope — remove items from prior features that have since been completed. Only keep items that are still relevant and unaddressed]
-
-Consumers are discoverable via `grep` and the list goes stale immediately. The knowledge base tracks what this domain needs, not who uses it.
-
-If existing connections are present, merge: add newly discovered connections, remove ones that are no longer accurate, keep the rest. Every connection must name a specific interface, type, or contract — no vague "interacts with the frontend."
+Consumers are discoverable via grep and go stale immediately; the KB tracks what this domain needs, not who uses it.
 ```
 
 ## Phase 3.5: Contradiction sweep
 
-**Skip this phase if no existing knowledge file was found — there is nothing to contradict.**
+**Skip this phase if no existing knowledge file was found — nothing to contradict.** **Skip at Trivial scale** — the single subagent already covers the file end-to-end.
 
-The Phase 3 subagents focus on their lens (architecture, gotchas, connections) and catch obvious contradictions. But they can miss entries that are *indirectly* invalidated — a constraint that was silently relaxed, a gotcha whose root cause was fixed as a side effect, a decision whose rationale no longer holds because a dependency changed.
-
-The contradiction sweep is a dedicated verification pass over every entry the subagents **kept unchanged**. It has one job: find what the subagents missed.
+The Phase 3 subagents focus on their lens and catch obvious contradictions. They miss entries indirectly invalidated — a constraint silently relaxed, a gotcha whose root cause was fixed as a side effect, a decision whose rationale no longer holds. This sweep challenges every entry the subagents **kept unchanged**.
 
 ### Step 1: Build the kept-entries list
 
-From each subagent's output, collect every entry that was carried forward unchanged from the existing knowledge file. These are entries the subagents judged as "still valid" — the sweep challenges that judgment.
+Collect entries carried forward unchanged. Exclude entries already marked `[SUPERSEDED]`, `[VERIFY]`, updated, or removed.
 
-Exclude entries the subagents already marked `[SUPERSEDED]`, `[VERIFY]`, updated, or removed — those are already handled.
+### Step 2: Dimensional pre-filter (parallel)
 
-### Step 2: Run the sweep by dimension
+Each section can only be contradicted by specific evidence classes. Split into focused calls with bounded context. Launch in parallel. Skip any dimension with zero kept entries.
 
-Each knowledge section can only be contradicted by specific types of feature evidence. Split the sweep by dimension so each call has a focused lens and a bounded context. Launch sweep calls **in parallel** — they are independent.
-
-Skip any dimension that has zero kept entries.
-
-#### Dimension: Architecture & Decisions
+Each dimension call uses this template (substitute scope + entries):
 
 ```
-You are a contradiction detector. Your ONLY job is to find Architecture and Decision entries that are no longer accurate given new evidence.
+You are a contradiction detector. Your ONLY job is to find entries no longer accurate given new evidence.
 
-## Evidence (scope: structural changes)
-- Feature scope and assumptions & risks
-- Sub-issue implementation notes
-- Commit messages (encode decisions made during implementation)
-- Files changed (show what moved, was added, or removed)
-
-[Paste only the above from Phase 2]
-
-## Entries to verify
-[Paste kept-unchanged 1. Architecture content and 2. Decision entries]
+Scope: [structural changes | implementation changes | fixes + quality | requirements + measurements]
+Evidence: [paste the relevant Phase 2 material for this scope]
+Entries to verify: [paste kept-unchanged entries for this dimension]
 
 For EACH entry, classify:
-- UNCHANGED — The feature has no bearing on this entry.
-- CONTRADICTED — The feature chose a different approach, replaced a component, or reversed this decision. [Evidence: name the sub-feature, commit, or scope change that contradicts it. State the new truth.]
-- NARROWED — The decision still holds but the feature added exceptions or shifted its boundaries. [Evidence: what changed and how the entry should be updated.]
-- STALE — The entry references files, types, or components that the feature renamed, moved, or removed. [Evidence: what moved or changed.]
+- UNCHANGED — evidence has no bearing.
+- CONTRADICTED — feature chose a different approach / fixed the root cause / relaxed the constraint. State the new truth and cite sub-feature or SHA.
+- NARROWED — still holds but scope/threshold/exceptions changed. Cite what changed.
+- STALE — references files, types, error messages that were renamed/moved/removed. Cite what moved.
 
-Rules:
-- Default to UNCHANGED — only flag what the evidence shows.
-- Be specific: name the exact sub-feature or commit.
+Default to UNCHANGED. Be specific — name sub-features or SHAs.
 ```
 
-#### Dimension: Patterns
+Dimensions:
+- **Architecture & Decisions** — scope: structural changes (feature scope, sub-issue notes, commit messages, files changed).
+- **Patterns** — scope: implementation changes (sub-issue notes, diffs summary, commit messages).
+- **Gotchas** — scope: fixes and quality (bug sub-features, optimize results, test results, reverts).
+- **Constraints** — scope: requirements and measurements (success criteria, test perf data, optimize measurements, constraint-violation bugs).
+
+### Step 3: Cross-reference pass
+
+The dimensional filter is cheap but leaky — a gotcha killed by a pattern change lives in different scopes. For any entry where the dimensional filter returned CONTRADICTED / NARROWED / STALE, locate entries that reference it (via `Motivated by`, `Prevents`, `Motivated`) and re-evaluate them:
 
 ```
-You are a contradiction detector. Your ONLY job is to find Pattern entries that are no longer accurate given new evidence.
+The following entry was flagged: [paste flagged entry + classification]
+These entries reference it: [paste referencing entries]
 
-## Evidence (scope: implementation changes)
-- Sub-issue implementation notes
-- Files changed with diffs summary
-- Commit messages
-
-[Paste only the above from Phase 2]
-
-## Entries to verify
-[Paste kept-unchanged 3. Pattern entries]
-
-For EACH entry, classify:
-- UNCHANGED — The pattern is still applied as described.
-- CONTRADICTED — The feature introduced a different pattern for the same concern, or the code no longer follows this pattern. [Evidence: name the sub-feature or commit. State what replaced it.]
-- NARROWED — The pattern still applies but its scope, trigger condition, or mechanism changed. [Evidence: what changed.]
-- STALE — The entry references files or functions that were renamed, moved, or removed. [Evidence: what moved.]
-
-Rules:
-- Default to UNCHANGED — only flag what the evidence shows.
-- Be specific: name the exact sub-feature or commit.
+For EACH referencing entry, classify: UNCHANGED | CONTRADICTED | NARROWED | STALE.
+Reason: the underlying motivation/prevention target shifted — does the referencing entry still hold?
 ```
 
-#### Dimension: Gotchas
+This pass is small (only entries with live cross-refs to a flagged target) and catches the contradictions the dimensional split misses.
 
-```
-You are a contradiction detector. Your ONLY job is to find Gotcha entries that are no longer accurate given new evidence.
+### Step 4: Apply sweep results
 
-## Evidence (scope: fixes and quality results)
-- Bug sub-features: what broke, root cause, fix approach
-- Optimize results: what was fixed, what was evolved
-- Test results: what passed, what failed
-- Reverts and multi-attempt commits from git history
+- **CONTRADICTED**: rewrite with the new truth, or remove if the concept no longer applies. Update `source:` to cite the evidence.
+- **NARROWED**: update to reflect the new scope or exceptions. Preserve what's still accurate.
+- **STALE**: verify referenced code (Glob/Grep). Update refs if moved; remove entry if removed.
 
-[Paste only the above from Phase 2]
+Fold corrections into subagent outputs before Phase 4.
 
-## Entries to verify
-[Paste kept-unchanged 4. Gotcha entries]
-
-For EACH entry, classify:
-- UNCHANGED — The gotcha still exists as described.
-- CONTRADICTED — The feature fixed the root cause of this gotcha. The problem no longer exists. [Evidence: name the bug fix, optimize result, or commit that resolved it.]
-- NARROWED — The gotcha still exists but the feature reduced its scope, added a safeguard, or changed the symptoms. [Evidence: what changed.]
-- STALE — The entry references files, error messages, or behaviors that the feature modified. [Evidence: what moved or changed.]
-
-Rules:
-- Default to UNCHANGED — only flag what the evidence shows.
-- Be specific: name the exact bug fix or optimize result.
-```
-
-#### Dimension: Constraints
-
-```
-You are a contradiction detector. Your ONLY job is to find Constraint entries that are no longer accurate given new evidence.
-
-## Evidence (scope: requirements and measurements)
-- Feature success criteria and assumptions & risks
-- Test results: performance data, security findings, what held up
-- Optimize results: what was measured, what improved or degraded
-- Bug sub-features involving constraint violations
-
-[Paste only the above from Phase 2]
-
-## Entries to verify
-[Paste kept-unchanged 5. Constraint entries]
-
-For EACH entry, classify:
-- UNCHANGED — The constraint still holds as described.
-- CONTRADICTED — The feature relaxed, tightened, or removed this constraint. [Evidence: name the success criterion, test result, or decision that changed it. State the new boundary.]
-- NARROWED — The constraint still exists but the feature changed its threshold, scope, or measurement method. [Evidence: what changed.]
-- STALE — The entry references metrics, tools, or thresholds that the feature replaced. [Evidence: what changed.]
-
-Rules:
-- Default to UNCHANGED — only flag what the evidence shows.
-- Be specific: name the exact test result or success criterion.
-```
-
-### Step 3: Apply sweep results
-
-For each non-UNCHANGED result:
-- **CONTRADICTED**: rewrite the entry with the new truth, or remove it if the concept no longer applies. The subagent provided the evidence — use it to write the corrected entry.
-- **NARROWED**: update the entry to reflect the new scope or exceptions. Preserve what's still accurate, adjust what changed.
-- **STALE**: verify the referenced code still exists (Glob/Grep). If it moved, update the reference. If it was removed, remove the entry.
-
-Fold these corrections into the subagent outputs before composing the final document.
-
-## Phase 4: Compose and challenge
-
-Merge the three subagent outputs (with contradiction sweep corrections applied) into a single document, then stress-test it.
+## Phase 4: Compose
 
 ### Step 1: Resolve flags
 
-Review all remaining `[SUPERSEDED]` and `[VERIFY]` flags from subagent output:
-- `[SUPERSEDED]`: remove the old entry. The subagent already wrote the replacement or determined the entry is obsolete.
-- `[VERIFY]`: investigate — read the relevant code or issue to determine if the entry is still valid. Keep, update, or remove based on findings.
+Review remaining `[SUPERSEDED]` and `[VERIFY]` flags:
+- `[SUPERSEDED]` — remove old entry; the subagent already wrote the replacement or determined obsolescence.
+- `[VERIFY]` — read the relevant code or issue. Keep / update / remove based on findings.
 
 Do NOT leave flags in the final document.
 
 ### Step 2: Cross-reference entries
 
-Check for internal consistency across sections:
-- Every `Motivated by:` reference in Decisions points to a real Constraint or Gotcha entry
-- Every `Prevents:` reference in Patterns points to a real Gotcha entry
-- Every `Motivated:` reference in Gotchas points to a real Decision entry
-- Connections list types/interfaces that actually exist in Decisions or Architecture
+Check internal consistency:
+- Every `Motivated by:` in Decisions points to a real Constraint or Gotcha.
+- Every `Prevents:` in Patterns points to a real Gotcha.
+- Every `Motivated:` in Gotchas points to a real Decision.
+- Connections list types/interfaces present in Decisions or Architecture.
+- Every entry has a `source:` field.
 
-Fix broken references: either add the missing entry or remove the dangling reference.
+Fix broken references: add the missing entry or drop the reference. Phase 5.5 will enforce bidirectional integrity — any dangling reference at that point is a hard fail.
 
 ### Step 3: Determine domain name and tags
 
-**Domain name:** lowercase, hyphenated slug matching the bounded context (e.g., `auth`, `event-ingestion`, `billing`).
-
-**Tags** (3-6): generated from key technologies, patterns, or cross-cutting concerns used in this domain. Lowercase, hyphenated. No generic tags like `feature` or `code`. Merge with existing tags if updating.
+- **Domain name:** lowercase, hyphenated (e.g., `auth`, `event-ingestion`).
+- **Tags** (3-6): lowercase, hyphenated, derived from key technologies, patterns, or cross-cutting concerns. No generic tags (`feature`, `code`). Merge with existing.
 
 ### Step 4: Write or update the knowledge file
-
-File path:
-```
-planwise/knowledge/<domain>.md
-```
 
 ```bash
 mkdir -p planwise/knowledge
 ```
 
-Use this template:
+Target path: `planwise/knowledge/<domain>.md`. Template:
 
 ```markdown
 ---
@@ -505,6 +345,7 @@ domain: <domain-name>
 tags: [<tag1>, <tag2>, <tag3>]
 features: [<N>, <N>]
 updated: <YYYY-MM-DD>
+eval_score: {green: N, yellow: N, red: N}   # populated by Phase 4.5
 ---
 
 # <Domain Name>
@@ -512,162 +353,232 @@ updated: <YYYY-MM-DD>
 <Preamble from Subagent 3>
 
 ## 1. Architecture
-
-<From Subagent 1 — mental model, components, integration points>
+<From Subagent 1>
 
 ## 2. Decisions
-
-<From Subagent 1 — each self-contained with rationale, consequences, and cross-references>
+<From Subagent 1 — self-contained with rationale, consequences, cross-refs, source>
 
 ## 3. Patterns
-
-<From Subagent 1 — each with trigger condition, mechanism, and cross-references>
+<From Subagent 1 — trigger condition, mechanism, cross-refs, source>
 
 ## 4. Gotchas
-
-<From Subagent 2 — each with symptom, root cause, prevention, and cross-references>
+<From Subagent 2 — symptom, root cause, prevention, cross-refs, source>
 
 ## 5. Constraints
-
-<From Subagent 2 — each with measurement, origin, and failure consequence>
+<From Subagent 2 — measurement, origin, failure consequence, source>
 
 ## 6. Connections
+<From Subagent 3 — depends on, shared types, deferred work>
 
-<From Subagent 3 — depends on, shared types (if non-obvious constraints), deferred work>
+## 7. Rejected
+<From Subagent 1 — approach, why rejected, reconsideration condition, source>
 ```
 
-**Retrieval convention:** Consumers grep for `^## [0-9]` to get a section TOC with line numbers, then read only the needed section by offset. Never `cat` the full file.
+**Retrieval convention:** consumers grep `^## [0-9]` to get a section TOC with line numbers, then read only the needed section. Never `cat` the full file.
 
-If updating an existing file, preserve the `features` list (append the new feature number) and set `updated` to today's date.
+If updating, preserve `features:` (append the new feature number) and set `updated:` to today.
 
-### Step 5: Quality gate
+**Large-scale per-domain split:** if the feature touches >1 domain, split into separate files per domain. Each must pass the cold start test independently. Update the index accordingly.
 
-Before finalizing, verify the document against these criteria:
+### Step 5: Entry-quality gate
 
-**Cold start test:** An agent or developer reading ONLY this file can:
-- Understand what the domain does and where the code lives (Architecture)
-- Know why things are built the way they are (Decisions)
-- Apply established approaches correctly (Patterns)
-- Avoid known failure modes (Gotchas)
-- Respect hard boundaries (Constraints)
-- Understand what other domains are affected by changes here (Connections)
+Verify before proceeding to Phase 4.5:
+- Every entry names specific files, functions, types, or error messages — nothing reads like generic advice.
+- Every Decision includes what was rejected and why.
+- Every Gotcha includes an observable symptom.
+- Every Constraint is measurable.
+- Every entry has a `source:` field.
+- No temporal language, feature-specific framing, or placeholder language.
+- `[critical]` markers are <20% of entries.
+- All cross-references resolve to real entries.
+- No duplicate entries covering the same knowledge from different angles.
+- Architecture is a navigational map, not documentation.
+- Preamble is 2-3 sentences.
 
-**Entry quality check:**
-- Every entry names specific files, functions, types, or error messages — nothing reads like generic advice
-- Every Decision includes what was rejected and why — not just what was chosen
-- Every Gotcha includes an observable symptom — not just "be careful with X"
-- Every Constraint includes a measurable threshold or concrete boundary — not just "must be fast"
-- No entry uses temporal language, feature-specific framing, or placeholder language
-- `[critical]` markers are used and account for <20% of entries
-- All cross-references (`Motivated by`, `Prevents`, `Motivated`) resolve to real entries
+Any failure: fix before Phase 4.5.
 
-**Structural check:**
-- No duplicate entries covering the same knowledge from different angles
-- No orphaned entries that reference removed decisions, patterns, or constraints
-- Architecture is a navigational map — flow, components, integration points — not documentation
-- Preamble is 2-3 sentences — it's a filter, not a summary
+## Phase 4.5: Adversarial reader + eval harness
 
-If any check fails, fix it before writing the file.
+The entry-quality gate is self-graded by the writer. Phase 4.5 introduces an isolated reader — an agent that has **only the new domain file** as context and must plan concrete tasks from it. Every gap the reader reports is a concrete deficiency a checklist cannot catch.
 
-### Split heuristic
+### Step 1: Assemble the task set
 
-Split only when subdomains are independently actionable (e.g., `auth.md` → `auth-oauth.md` + `auth-sessions.md`). A coherent domain that runs long is better than two fragments that fail the cold start test. Each resulting file must pass the cold start test independently. Update the index accordingly.
+**Eval questions.** Read (or create) `planwise/knowledge/<domain>.eval.md`:
+
+```bash
+cat planwise/knowledge/<domain>.eval.md    # if exists
+```
+
+If the file exists, use its existing questions unchanged. If not, seed with 5 developer-scoped questions derived from the domain's preamble and this feature's scope — questions a future developer or agent would plausibly ask before changing this domain. Examples: "How would I add rate-limiting to the existing endpoints?", "Where does retry logic live and what are its bounds?", "What breaks if I change the event schema?"
+
+Write the eval file:
+
+```markdown
+---
+domain: <domain-name>
+updated: <YYYY-MM-DD>
+---
+
+# Eval questions for <domain>
+
+Used by /memo Phase 4.5 to stress-test the domain knowledge file. Edit freely — questions represent what future developers and agents will ask.
+
+- <question 1>
+- <question 2>
+...
+```
+
+**Past-feature hypotheticals.** From the domain's `features:` frontmatter, sample 2 feature titles (excluding the current one). If fewer than 2 exist, synthesize one plausible scenario from preamble + scope and flag it as synthetic.
+
+### Step 2: Run the adversarial reader
+
+Spawn one subagent with ONLY the new domain file as context:
+
+```
+You are planning concrete changes in this domain using ONLY the knowledge file below. You have no other context — no access to the codebase, git, or other files.
+
+Tasks:
+- <eval question 1>
+- <eval question 2>
+- ...
+- Plan how you would implement: <past feature title 1>
+- Plan how you would implement: <past feature title 2>
+
+For EACH task:
+1. Produce a brief plan (3-5 bullets) using only information from the file.
+2. List every piece of information you would need to act correctly but cannot find in the file. Each gap is a concrete unanswered question.
+3. Rate: green (no gaps), yellow (minor gaps, task achievable), red (critical gaps, task blocked).
+
+Knowledge file:
+[paste full domain file]
+```
+
+### Step 3: Apply results
+
+- **Any red rating** → revise the file to close the gap. Add the missing entry (with source), then re-run the reader on just the red tasks until green or yellow.
+- **Yellow ratings** → log to Phase 7 report as known minor gaps. Do not block.
+- **All green** → record and proceed.
+
+Record `eval_score: {green: N, yellow: N, red: 0}` in the frontmatter. Compare to the previous run's `eval_score` (if any) — a regression (fewer greens, more reds) is a red flag the distillation lost information.
 
 ## Phase 5: Update the index
 
-The index is a grep-optimized domain map. Consumers grep INDEX.md to discover which domain file contains a concept, then grep the domain file for section offsets. The index must contain enough entry titles that a single grep finds the right domain + section.
+The index is a grep-optimized domain map. Consumers grep INDEX.md to discover which domain file contains a concept, then grep the domain file for section offsets.
 
 ### Retrieval convention
 
 ```bash
-# Find which domain: grep INDEX.md for a concept
-grep -i "idempotent" planwise/knowledge/INDEX.md
-
-# Read the domain file, or retrieve specific sections by offset:
-cat planwise/knowledge/<domain>.md
-# or:
-grep -n '^## [0-9]' planwise/knowledge/<domain>.md  # section TOC with line numbers
-# then read the needed section by offset
+grep -i "idempotent" planwise/knowledge/INDEX.md           # find domain + section
+grep -n '^## [0-9]' planwise/knowledge/<domain>.md         # section TOC with line numbers
 ```
 
-### If `planwise/knowledge/INDEX.md` does not exist, create it:
+### If `INDEX.md` does not exist, create it:
 
 ```markdown
 # Knowledge Base
 
-Living knowledge about each domain in the system. Each file contains the current truth — architecture, decisions, patterns, gotchas, constraints, and connections. Updated by `/memo` after each feature.
+Living knowledge about each domain. Each file contains current truth — architecture, decisions, patterns, gotchas, constraints, connections, rejected approaches. Updated by `/memo` after each feature.
 
-Retrieval: `grep -i "<keyword>" planwise/knowledge/INDEX.md` → find domain + section, then read the domain file or `grep -n '^## [0-9]' planwise/knowledge/<domain>.md` for section offsets.
+Retrieval: `grep -i "<keyword>" planwise/knowledge/INDEX.md` → find domain + section, then `grep -n '^## [0-9]' planwise/knowledge/<domain>.md` for offsets. Typed queries: use `<domain>.jsonl`.
 
 ## Domains
 ```
 
-### Add or update the entry for this domain:
+### Add or update the domain entry:
 
 ```markdown
 - **[<Domain Name>](./<domain>.md)** — <preamble summary> | `<tag1>` `<tag2>` `<tag3>`
-  - Decisions: <comma-separated decision titles>
-  - Patterns: <comma-separated pattern titles>
-  - Gotchas: <comma-separated gotcha titles>
-  - Constraints: <comma-separated constraint titles>
+  - Decisions: <comma-separated titles>
+  - Patterns: <comma-separated titles>
+  - Gotchas: <comma-separated titles>
+  - Constraints: <comma-separated titles>
+  - Rejected: <comma-separated titles>
 ```
 
-One block per domain. If the domain already has an entry, update all lines (summary, tags, and entry titles). Maintain alphabetical order by domain name. Entry titles must match the bold titles in the domain file exactly — they are grep targets.
+Maintain alphabetical order. Entry titles must match the bold titles in the domain file exactly — they are grep targets.
+
+## Phase 5.5: Emit JSONL twin & enforce link integrity
+
+The markdown is for humans. Agents consume a typed JSONL twin — one line per entry across all sections — for structured retrieval without markdown parsing.
+
+### Step 1: Emit `<domain>.jsonl`
+
+Re-read the finalized `<domain>.md` and emit `planwise/knowledge/<domain>.jsonl`. One line per entry in sections 1-7:
+
+```json
+{"id":"<domain>/<section>/<title-slug>","domain":"<domain>","section":"<section-name>","title":"<title>","body":"<full entry body, markdown preserved>","critical":<bool>,"refs":[<referenced-entry-ids>],"source":"<sha>|<issue-id>","updated":"<YYYY-MM-DD>"}
+```
+
+- `id` — stable: `<domain>/<section>/<kebab-slug-of-title>`.
+- `refs` — resolve every `Motivated by:` / `Prevents:` / `Motivated:` to the target entry's id. Empty list if none.
+- `critical` — true if entry is marked `[critical]`, else false.
+- `source` — mirror the `source:` line from the entry.
+
+Architecture and Preamble are free-form; emit each as a single entry with `title: "preamble"` / `title: "architecture"` and empty `refs`.
+
+### Step 2: Enforce bidirectional link integrity
+
+For every entry with non-empty `refs`, verify each referenced id exists in the JSONL. For any dangling ref → **hard fail**: report the broken reference, return to Phase 4 Step 2, fix, re-emit.
+
+For every entry referenced by another, append the referencing entry's id to its `refs` list (back-reference). The JSONL is rewritten once both forward and back refs are complete. This makes orphan detection cheap: any future entry removal that breaks a back-reference surfaces immediately.
+
+### Step 3: Sanity check
+
+```bash
+wc -l planwise/knowledge/<domain>.jsonl    # entry count
+grep -c '^## ' planwise/knowledge/<domain>.md   # section count
+```
+
+Entry count should roughly match bullet count in the markdown. Spot-check 2 entries round-trip correctly.
 
 ## Phase 6: Plan retrospective
 
-Distill generalizable planning lessons from this feature's execution signals. Output target: `planwise/knowledge/_lessons.md` — a separate artifact consumed only by `/plan` and `/brief` (leading `_` sorts it apart from domain files and keeps it out of the domain-concept grep path). Lessons are hypotheses about how to plan better in this codebase; they strengthen through confirmation and graduate into domain knowledge when proven.
+Distill generalizable planning lessons from this feature's execution signals. Output: `planwise/knowledge/_lessons.md` — a separate artifact consumed only by `/plan` and `/brief` (leading `_` sorts it apart from domain files and keeps it out of the domain-concept grep path). Lessons are hypotheses; they strengthen through confirmation and graduate into domain knowledge when proven.
 
-This phase uses the same evidence gathered in Phase 2 but reads it through a planning-defect lens — not domain truth. Never duplicate entries across `_lessons.md` and the domain file.
+This phase reads Phase 2 material through a planning-defect lens. Never duplicate entries across `_lessons.md` and the domain file.
 
 ### Step 1: Collect convergence signals
 
-Re-read the Phase 2 material and tag each finding with its signal class. Record signal → root-cause mappings:
+Tag each finding with its signal class:
 
-- **scope-miss** — sub-features added after the original plan was approved (plan under-scoped)
-- **risk-miss** — bug sub-features filed during implementation (Key Assumption violated at runtime)
-- **approach-wrong** — `jj op log` abandons, reverts, or `jj op log --patch` shows discarded approaches on the same file/concept
-- **quality-gap** — optimize verdict `stuck`, or UAT failures tied to untested plan assumptions
-- **estimation-miss** — sub-features requiring >1 rework cycle (visible in op log as repeated rewrites on the same change-id)
+- **scope-miss** — sub-features added after the plan was approved.
+- **risk-miss** — bug sub-features filed during implementation.
+- **approach-wrong** — `jj op log` abandons or `--patch` shows discarded approaches on the same file/concept.
+- **quality-gap** — optimize verdict `stuck`, or UAT failures on untested assumptions.
+- **estimation-miss** — sub-features requiring >1 rework cycle (repeated rewrites on same change-id).
 
 ### Step 1.5: Score applied lessons (usefulness feedback)
 
-Before clustering new signals, measure whether lessons retrieved by the *originating plan* actually prevented the defects they claimed to guard against. This is the retrieval-usefulness loop — without it, pruning is age-based, not quality-based.
+Measure whether lessons retrieved by the *originating plan* actually prevented the defects they claimed to guard against.
 
 ```bash
 planwise view $ARGUMENTS
 ```
 
-Extract the `## Lessons Applied` block from the feature body (populated by `/plan` Phase 1 Step 3). If the block is absent, skip this step — no lessons were retrieved for this feature.
+Extract the `## Lessons Applied` block from the feature body (populated by `/plan` Phase 1). If absent AND `_lessons.md` has active entries whose `trigger` domain-tag matches this feature's domain → record **contract-miss**: list their titles in Phase 7 as "lessons plausibly unretrieved". Do not score them as failed — usefulness is unknown, not zero.
 
 For each lesson entry in the block:
 
-1. **Look up the lesson** in `planwise/knowledge/_lessons.md` by its title.
-   - If not found (already archived or promoted to a domain file) → skip silently, continue to next.
-2. **Determine the claim class** from the entry's `class:` field.
-3. **Check this run's Step 1 signals.** If the claimed class appears in the convergence signals collected from this feature:
-   - Lesson was applied **and the defect class still occurred** → the lesson did not prevent what it claimed.
-   - Bump `failed_applications` by 1.
-4. **If the claimed class does NOT appear in signals:**
-   - Lesson was applied **and the defect class did not occur** → the lesson plausibly worked for this feature.
-   - Bump `successful_applications` by 1.
-5. In both cases, update the entry's `last_seen` to today's date.
+1. **Look up** the lesson in `planwise/knowledge/_lessons.md` by title. If not found (archived or promoted) → skip silently.
+2. **Determine** the claim class from the entry's `class:` field.
+3. **Check this run's Step 1 signals.** If the claimed class appears:
+   - Applied and defect class still occurred → the lesson did not prevent what it claimed. Bump `failed_applications` by 1.
+4. **If the claimed class does NOT appear:**
+   - Applied and defect class did not occur → plausibly worked. Bump `successful_applications` by 1.
+5. Update `last_seen` to today.
 
-Record the per-lesson usefulness verdicts for the Phase 7 report. Do not dedupe or prune yet — Step 4 applies the updated counters.
+Record per-lesson verdicts for Phase 7. Do not prune yet — Step 4 applies the updated counters.
 
-**Note:** `successful_applications` is a weak signal — absence of a defect class could mean the lesson worked, or simply that the feature did not exercise the risk. It is still a better signal than no measurement. `failed_applications` is a strong signal — the lesson was applied and the defect it promised to prevent happened anyway.
+`successful_applications` is a weak signal (the feature may not have exercised the risk). `failed_applications` is strong.
 
 ### Step 2: Cluster and gate
 
 Group signals by root cause. Apply the gate:
 
 - A candidate lesson requires **≥2 signals of different classes** pointing to the same root cause. Single-class or single-signal clusters = normal adaptation, **discard**.
-- Reject candidates that:
-  - restate rules already in CLAUDE.md or project rulesets
-  - are feature-specific ("remember X in feat-042") — lessons must generalize
-  - describe domain truth — those belong in the Phase 3-4 domain file, not here
+- Reject candidates that restate CLAUDE.md rules, are feature-specific ("remember X in feat-042"), or describe domain truth (belongs in Phase 3 domain file, not here).
 
-Default to discarding. The gate exists to prevent the lessons file from becoming a write-only journal. **If no candidate survives the gate, say "Nothing to save." and skip the remaining steps — this is a valid and expected outcome.**
+Default to discarding. If no candidate survives: "Nothing to save." — skip the remaining steps. Valid and expected outcome.
 
 ### Step 3: Read existing lessons and dedupe
 
@@ -677,36 +588,55 @@ test -f planwise/knowledge/_lessons.md && cat planwise/knowledge/_lessons.md
 
 For each candidate that passed the gate:
 
-- If an existing active entry has a matching `trigger` and semantically equivalent `lesson` → **bump `confirmations`**, append the current feature id to `evidence`, update `last_seen` to today's date. Do **not** add a new entry.
+- Existing active entry has matching `trigger` + semantically equivalent `lesson` → **bump `confirmations`**, append feature id to `evidence`, update `last_seen`. Do not add a new entry.
 - Else → stage a new entry for Step 5.
 
 ### Step 4: Apply promotion and pruning
 
-**Promote:** any active entry where `successful_applications >= 3 AND failed_applications == 0` AND whose `trigger` is scoped to a single domain — rewrite it as a Decision or Gotcha in that domain file (using the Phase 3 writing principles) and remove it from `_lessons.md`. Promotions are listed in the Phase 7 report. Meta graduates to canonical only when the lesson has demonstrably prevented its claimed defect class across multiple features. **Do NOT promote on `confirmations` alone** — re-discovery means the bug keeps happening, not that the lesson works.
+**Promote (gated by rewrite review).** Any active entry where `successful_applications >= 3 AND failed_applications == 0` AND whose `trigger` is scoped to a single domain is a promotion candidate. Do NOT promote directly. Spawn a **rewrite reviewer** subagent:
 
-**Prune — quality-driven (strong signal):** move any entry where `failed_applications > successful_applications` into the `## Archive` section immediately, regardless of age. The lesson was applied and the defect it claimed to prevent happened anyway — it's net-harmful or wrong. Archiving it removes noise and prevents future plans from being biased by a bad hypothesis. Record the archival reason as `net failure: F failed / S successful`.
+```
+Input:
+- Original lesson entry: [paste full entry]
+- Proposed domain entry: [paste your rewrite as a Decision or Gotcha]
+- Target section in domain file: [paste the existing section]
 
-**Prune — age-driven (safety net for never-retrieved lessons):** move entries with `confirmations: 1 AND successful_applications == 0 AND failed_applications == 0` where `(current_feature_number - first_evidence_feature_number) >= 10` into `## Archive`. These lessons have never been retrieved and never been re-confirmed — untested dead weight. Record the archival reason as `untriggered >= 10 features`.
+Checks:
+1. Does the rewrite preserve the lesson's actionable trigger?
+2. Is it in the right section (Decision for design-choice, Gotcha for failure-mode)?
+3. Does it duplicate an existing entry in the target section? If yes, merge into the existing entry (preserving both evidence trails) instead of adding.
+4. Does it meet the Writing Principles and carry a `source:` field?
 
-Archived entries are kept for audit but excluded from the `/plan` grep path (consumers grep the `## Active` section only).
+Output: approve | revise (with reasons) | reject (with reason).
+```
 
-**Size cap (forces consolidation):** the `## Active` section holds at most **40 entries**. If adding the new lessons would exceed the cap, do NOT append — instead, before writing, consolidate: merge semantically overlapping entries (preserve the higher `confirmations` and union the `evidence` lists) or archive the lowest-`confirmations` entries first. The cap is a quality ratchet — it forces the distiller to think about which lessons actually matter rather than accumulating indefinitely.
+Only approved rewrites land in the domain file and leave `_lessons.md`. Report all outcomes in Phase 7. Promotions remain rare — rewrite review is low ongoing cost.
+
+**Skip rewrite review at Trivial scale** — promotion still applies, but use direct rewrite following Writing Principles (no reviewer subagent).
+
+**Prune — quality-driven (strong signal):** move any entry where `failed_applications > successful_applications` to `## Archive` immediately, regardless of age. Reason: `net failure: F failed / S successful`.
+
+**Prune — age-driven (safety net):** move entries where `confirmations: 1 AND successful_applications == 0 AND failed_applications == 0` and `(current_feature_number - first_evidence_feature_number) >= 10` to `## Archive`. Reason: `untriggered >= 10 features`.
+
+Archived entries are kept for audit but excluded from the `/plan` grep path.
+
+**Size cap:** `## Active` holds at most **40 entries**. If adding new lessons would exceed the cap, consolidate first (merge semantically overlapping entries, preserving higher `confirmations` and unioning `evidence`) or archive lowest-`confirmations` entries.
 
 ### Step 5: Write `_lessons.md`
 
-If the file does not exist, create it with this header:
+If the file does not exist, create with this header:
 
 ```markdown
 # Planning Lessons
 
-Hypotheses about how /plan and /brief should approach work in this codebase, distilled from execution signals by /memo Phase 6. Consumed by /plan Phase 1 and /brief Phase 1. Lessons strengthen through confirmation and graduate into domain knowledge at confirmations >= 3.
+Hypotheses about how /plan and /brief should approach work in this codebase, distilled from execution signals by /memo Phase 6. Consumed by /plan Phase 1 and /brief Phase 1. Lessons strengthen through confirmation and graduate into domain knowledge when `successful_applications >= 3 AND failed_applications == 0`.
 
 Retrieval: grep -i -B1 -A5 "<keyword-or-domain-tag>" planwise/knowledge/_lessons.md
 
 ## Active
 ```
 
-Entry format (one block per lesson, under `## Active`):
+Entry format under `## Active`:
 
 ```markdown
 - **[Lesson title]**
@@ -715,33 +645,78 @@ Entry format (one block per lesson, under `## Active`):
   - lesson: <one sentence, generalizable, concrete, evergreen>
   - evidence: [feat-NNN, feat-MMM, ...]
   - confirmations: N
-  - successful_applications: N   # retrieved in a plan, defect class did NOT recur in that feature's memo
-  - failed_applications: N       # retrieved in a plan, defect class DID recur — lesson did not work
+  - successful_applications: N
+  - failed_applications: N
   - first_seen: YYYY-MM-DD
   - last_seen: YYYY-MM-DD
 ```
 
-Append an `## Archive` section at the bottom for pruned entries (same format). Preserve existing entries not touched by this run.
+Append `## Archive` at the bottom (same format). Preserve untouched entries.
 
 ### Step 6: Quality gate
 
-Before writing, verify:
+- Every lesson has a concrete `trigger` (domain tag, file glob, or keyword set).
+- Every `lesson` is one sentence, present tense, evergreen.
+- Every lesson has a `class`.
+- No duplicate of CLAUDE.md rule or Phase 4 domain entry.
+- All approved promotions are applied (domain file updated, entry removed from `_lessons.md`) before writing.
+- `## Active` section ≤ 40 entries after consolidation.
 
-- Every lesson names a concrete `trigger` — a domain tag, file glob, or keyword set a future `/plan` can actually grep. No "general advice" triggers.
-- Every `lesson` is one sentence, present tense, evergreen — no temporal references, no feature-specific framing.
-- Every lesson carries a `class` tag so `/plan` knows which section to route it into.
-- No lesson duplicates a rule in CLAUDE.md or an entry in the domain file written in Phase 4.
-- All promotions are completed (domain file updated, entry removed from `_lessons.md`) before writing.
+If zero lessons survive: write nothing; note "Nothing to save." in Phase 7.
 
-If zero lessons survive the gate, write nothing to `_lessons.md` and note "Nothing to save." in the Phase 7 report. After consolidation, the `## Active` section must not exceed 40 entries.
+## Phase 6.5: Cross-domain reflection (cadence-gated)
+
+Single-feature `/memo` cannot see patterns spanning domains. This phase runs periodically to surface them.
+
+### Cadence gate
+
+Run ONLY when:
+- This feature brings the domain's `features:` count to a multiple of 5, OR
+- This feature touched >1 domain.
+
+Otherwise skip. Record "skipped (cadence: <reason>)" in Phase 7. Most runs skip.
+
+### Reflection call
+
+One subagent. Input: per-domain frontmatter + section headings + entry titles only (no bodies — bounds context).
+
+```bash
+for f in planwise/knowledge/*.md; do
+  [[ "$f" == *INDEX.md || "$f" == *_lessons.md ]] && continue
+  head -n 10 "$f"                    # frontmatter
+  grep -n '^## \|^- \*\*' "$f"       # section headings + entry titles
+done
+```
+
+Prompt:
+
+```
+You are looking for cross-domain consolidation opportunities across the full knowledge base.
+
+Per-domain snapshot (frontmatter + headings + entry titles, no bodies):
+[paste the collected output]
+
+Produce:
+1. **Recurring patterns** — concepts appearing as separate entries in 3+ domains. Candidate for a global pattern file or shared module. List: pattern name, domains involved, suggested action.
+2. **Terminology drift** — the same concept named differently across domains. Candidate for canonicalization. List: variant names, domains, suggested canonical term.
+3. **Redundant gotchas** — gotchas with a common root cause across domains, suggesting a cross-cutting concern. List: gotcha titles, domains, suggested consolidation.
+
+Each finding is a PROPOSAL, not an auto-edit. Report findings for Phase 7 — no file changes.
+```
+
+### Apply results
+
+Reflection findings go to the Phase 7 report only. No automatic file changes in this phase — cross-domain edits happen in subsequent human-directed work (a follow-up feature, a dedicated consolidation task).
 
 ## Phase 7: Report
 
 ```
 Knowledge base updated for Feature $ARGUMENTS.
 
-Domain:  <domain-name>
+Scale:   <trivial | standard | large>
+Domain:  <domain-name> (or list if Large split)
 File:    planwise/knowledge/<domain>.md
+Twin:    planwise/knowledge/<domain>.jsonl (N entries)
 Action:  <created | updated>
 
 Sections:
@@ -751,27 +726,45 @@ Sections:
   Gotchas:       N entries (M new, K updated, J removed)
   Constraints:   N entries (M new, K updated, J removed) [P critical]
   Connections:   <created | updated | unchanged>
+  Rejected:      N entries (M new, K updated, J removed)
 
 Cross-references: N links between entries
-Contradiction sweep: N entries verified, M corrections (list one-line summaries)
-Quality gate: all checks passed
+Contradiction sweep: N entries verified, M corrections (one-line summaries)
+  Dimensional pre-filter: N flagged
+  Cross-reference pass:   M additional flags surfaced
+Link integrity: all forward and back-references resolved
+
+Adversarial reader (Phase 4.5):
+  Tasks run:    N eval questions + M past-feature hypotheticals
+  Eval score:   green=N yellow=N red=N (prev: green=N yellow=N red=N)
+  Revisions:    N iterations to close red gaps
+  Minor gaps:   <list yellow findings, if any>
 
 Tags: <tag1>, <tag2>, <tag3>
 
 Planning lessons (planwise/knowledge/_lessons.md):
-  Signals collected:   N (scope-miss=A, risk-miss=B, approach-wrong=C, quality-gap=D, estimation-miss=E)
+  Signals collected: N (scope-miss=A, risk-miss=B, approach-wrong=C, quality-gap=D, estimation-miss=E)
   Usefulness feedback (from originating plan's Lessons Applied):
-    Applied:           N lessons retrieved and referenced in the plan
-    Successful:        N (defect class did not recur — list titles)
-    Failed:            N (defect class recurred despite lesson — list titles with reason)
-  Lessons added:       N new entries
-  Lessons confirmed:   N existing entries strengthened (list titles with new confirmations count)
-  Lessons promoted:    N entries graduated into domain files (successful_applications>=3, failed==0 — list title → target section)
-  Lessons archived:    N (net failure: F | untriggered age: A — list titles with reason)
-  Outcome (if none):   "No lessons extracted — signals did not converge"
+    Applied:          N lessons retrieved and referenced in the plan
+    Successful:       N (defect class did not recur — list titles)
+    Failed:           N (defect class recurred despite lesson — list titles with reason)
+    Contract-miss:    N lessons plausibly unretrieved (/plan did not emit Lessons Applied block — list titles)
+  Lessons added:      N new entries
+  Lessons confirmed:  N existing entries strengthened (list titles with new confirmations count)
+  Lessons promoted:   N entries graduated into domain files (list: title → target section, rewrite review outcome)
+  Lessons archived:   N (net failure: F | untriggered age: A — list titles with reason)
+  Outcome (if none):  "No lessons extracted — signals did not converge"
+
+Cross-domain reflection (Phase 6.5):
+  Status: <ran | skipped (cadence: <reason>)>
+  Recurring patterns:   N proposals (list)
+  Terminology drift:    N proposals (list)
+  Redundant gotchas:    N proposals (list)
+  (proposals only — no automatic changes)
 
 This knowledge is available as context for future /plan sessions.
 To browse: grep -n '^## [0-9]' planwise/knowledge/<domain>.md
 To search: grep -i "<keyword>" planwise/knowledge/INDEX.md
+To query: jq 'select(.critical)' planwise/knowledge/<domain>.jsonl
 To review lessons: grep -i "<trigger>" planwise/knowledge/_lessons.md
 ```

@@ -68,6 +68,8 @@ Lessons are hypotheses about how to plan better in this codebase, produced by `/
 - **approach-wrong** lessons → Technical Context (reject the rejected approach up front)
 - **quality-gap** / **estimation-miss** lessons → Key Assumptions & Risks (calibration)
 
+**Contract:** record the retrieved lesson titles as an explicit list. The Pre-creation checklist verifies each one appears in the feature body's `## Lessons Applied` section. The usefulness feedback loop in `/memo` Phase 6 depends on this block — retrieving a lesson without emitting the block leaves its usefulness unmeasurable.
+
 Integrate domain knowledge into the feature body as you write each section — don't dump it wholesale:
 - **5. Constraints** → carry forward into Success Criteria (as guardrails) and Key Assumptions & Risks
 - **2. Decisions** → reference in Technical Context. If the new feature needs to override a past decision, state explicitly: what the prior decision was, why it no longer holds, and what replaces it
@@ -189,6 +191,7 @@ Then use `AskUserQuestion` tool to ask: **"Ready to create issues, or stop here?
 Before creating issues, verify:
 - Every success criterion in the feature maps to at least one sub-feature
 - Every sub-feature traces back to at least one success criterion
+- **Lessons contract:** if Phase 1 Step 3 returned lesson hits, the feature body contains a `## Lessons Applied` section with one line per retrieved lesson (title, class, where it shaped the plan). If Step 3 returned zero hits, the section is absent. A mismatch is a contract violation — fix before creating issues.
 
 ## Phase 3: Create Issues
 
