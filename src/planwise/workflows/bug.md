@@ -113,6 +113,8 @@ Lessons are hypotheses about how to plan better in this codebase, produced by `/
 - **approach-wrong** lessons → if the bug trace points at a previously-rejected approach, the root cause may be that the approach is re-emerging; widen suspects to include anything that reintroduced it
 - **scope-miss** / **estimation-miss** / **quality-gap** lessons → usually irrelevant at diagnosis time; skip unless the lesson directly names a concrete failure mode
 
+**Contract:** record the retrieved lesson titles as an explicit list. The Pre-creation checklist verifies each one appears in the bug body's `## Lessons Applied` section. `/memo` Phase 6 Step 1.5 reads this block from bug sub-feature bodies (alongside feature bodies) to score whether the lesson prevented its claimed defect class — retrieving a lesson without emitting the block leaves its usefulness unmeasurable.
+
 Bug never writes to `_lessons.md` — single-bug diagnosis is single-signal and won't converge; production is reserved for `/memo` at the feature level.
 
 ### Root cause
@@ -178,6 +180,12 @@ MUST NOT contain placeholder language — every instruction must be actionable a
 
 ## Dependencies
 [Blocked by <slug> or "None"]
+
+## Lessons Applied
+<!-- Include this section only when the Planning-lessons lookup returned hits.
+     One line per retrieved lesson, stating the class and exactly where it shaped the diagnosis or fix.
+     If no lessons were retrieved, omit the section entirely — do not write "none". -->
+- **[Lesson title]** (class) → reflected in *[Section name]* as "<specific sentence or bullet added because of this lesson>"
 ```
 
 ### Verify assumptions before presenting
@@ -232,6 +240,7 @@ Then use `AskUserQuestion`: **"Bug spec ready. Create the issue, or stop here?"*
 - Every requirement has a matching acceptance criterion
 - *Verification* regression matrix has a concrete check per item
 - Repro steps are minimized
+- **Lessons contract:** if the Planning-lessons lookup returned hits, the bug body contains a `## Lessons Applied` section with one line per retrieved lesson (title, class, where it shaped the diagnosis or fix). If the lookup returned zero hits, the section is absent. A mismatch is a contract violation — fix before creating the issue.
 
 ## Phase 4: Create the bug issue
 

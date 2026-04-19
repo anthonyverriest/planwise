@@ -549,13 +549,16 @@ Tag each finding with its signal class:
 
 ### Step 1.5: Score applied lessons (usefulness feedback)
 
-Measure whether lessons retrieved by the *originating plan* actually prevented the defects they claimed to guard against.
+Measure whether lessons retrieved by the *originating plan, task brief, or bug diagnosis* actually prevented the defects they claimed to guard against.
 
 ```bash
 planwise view $ARGUMENTS
+planwise view <sub-feature-id>    # for every sub-feature from Phase 2 Step 1 (any type)
 ```
 
-Extract the `## Lessons Applied` block from the feature body (populated by `/plan` Phase 1). If absent AND `_lessons.md` has active entries whose `trigger` domain-tag matches this feature's domain → record **contract-miss**: list their titles in Phase 7 as "lessons plausibly unretrieved". Do not score them as failed — usefulness is unknown, not zero.
+Extract the `## Lessons Applied` block from the feature body (populated by `/plan` Phase 1) AND from every sub-feature body that contains one (populated by `/brief` for task sub-features, `/bug` for bug sub-features). Coding and UAT sub-features created by `/plan` do not carry their own block — they inherit from the feature. Union the retrieved lessons across all sources; if a lesson appears in more than one, score once (de-duplicate by title).
+
+If no block is found in any source AND `_lessons.md` has active entries whose `trigger` domain-tag matches this feature's domain → record **contract-miss**: list their titles in Phase 7 as "lessons plausibly unretrieved". Do not score them as failed — usefulness is unknown, not zero.
 
 For each lesson entry in the block:
 
