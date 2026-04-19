@@ -67,6 +67,21 @@ For each conflicted path: Read the file, `jj show` the trunk change that introdu
 
 `jj status` must report no remaining conflicts before continuing.
 
+## Step 1.6: Planning-lessons lookup
+
+Before implementing, check `_lessons.md` for relevant planning lessons produced by `/memo` Phase 6.
+
+```bash
+test -f planwise/knowledge/_lessons.md && grep -i -B1 -A5 "<domain-tag-or-keyword-from-spec>" planwise/knowledge/_lessons.md
+```
+
+Match by `trigger` field (domain tag, file glob, or keyword set drawn from the task's Scope and Implementation Notes). If no file or no match, skip silently. Ignore any hit whose context falls under the `## Archive` heading — those lessons are pruned and not active. For each hit, adjust implementation:
+- **risk-miss** → treat the named assumption as already broken; verify explicitly before coding against it
+- **approach-wrong** → do not use the rejected approach named in the lesson; pick the alternative it recommends
+- **scope-miss** / **estimation-miss** / **quality-gap** → flag to the user if the lesson reveals work the spec didn't account for; do not silently expand scope
+
+Task never writes to `_lessons.md` — production is reserved for `/memo` at the feature level, where convergence signals actually accumulate.
+
 ## Rules
 
 $RULES
@@ -110,6 +125,8 @@ Write tests that verify the Requirements and Edge Cases from the spec. Cover the
 Prioritize untested public API surface — at most 10 functional test cases.
 
 ### Adversarial pass
+
+Do NOT skip this pass with "functional tests passed, this task is small." Adversarial probes target a different failure class than functional tests — passing functional ≠ robust.
 
 For each file modified, probe **input abuse** — try to break the code:
 
@@ -157,6 +174,8 @@ One analysis pass over the files you modified — no convergence loop. Optimize 
 Do NOT modify test files. If a change breaks tests, the change is wrong.
 
 ### Analyze
+
+Do NOT collapse the 4 lenses into one with "diff is small, only Quality matters here." Each lens targets a distinct bug class — Safety catches leaks, Structure catches layering drift, Performance catches hot-path regressions. Skipping lenses is how production bugs leak through single-pass reviews.
 
 Read each file you modified. Walk these 4 lenses (one pass, no subagents):
 

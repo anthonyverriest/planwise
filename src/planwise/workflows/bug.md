@@ -102,6 +102,19 @@ If no index or no match, skip. Otherwise read 0–2 matched domain files and wei
 - **2. Decisions** → carry into *Constraints* (override only with explicit justification)
 - **6. Connections** → reserve for Phase 3 impact analysis
 
+### Planning-lessons lookup
+
+```bash
+test -f planwise/knowledge/_lessons.md && grep -i -B1 -A5 "<symptom-keywords-or-affected-file-glob>" planwise/knowledge/_lessons.md
+```
+
+Lessons are hypotheses about how to plan better in this codebase, produced by `/memo` Phase 6. Match by `trigger` field (domain tag, file glob drawn from affected files, or keyword set from the symptom). If no file or no match, skip silently. Ignore any hit whose context falls under the `## Archive` heading — those lessons are pruned and not active. For each hit, shape diagnosis:
+- **risk-miss** lessons → treat the named assumption as a high-probability root cause candidate; check it early before exploring other hypotheses
+- **approach-wrong** lessons → if the bug trace points at a previously-rejected approach, the root cause may be that the approach is re-emerging; widen suspects to include anything that reintroduced it
+- **scope-miss** / **estimation-miss** / **quality-gap** lessons → usually irrelevant at diagnosis time; skip unless the lesson directly names a concrete failure mode
+
+Bug never writes to `_lessons.md` — single-bug diagnosis is single-signal and won't converge; production is reserved for `/memo` at the feature level.
+
 ### Root cause
 
 You have the failing test from Phase 1 — that's the proximate symptom. Trace from there to root cause by asking *Why?* until the answer is actionable (a specific code, config, schema, or spec change fixes it). Cite each layer with `@package/path:line`.

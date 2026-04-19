@@ -56,6 +56,18 @@ grep -n '^## [0-9]' planwise/knowledge/<domain>.md  # section TOC with line numb
 # then read the needed section by offset
 ```
 
+**Step 3 — Planning-lessons lookup:**
+
+```bash
+test -f planwise/knowledge/_lessons.md && grep -i -B1 -A5 "<domain-tag-or-keyword>" planwise/knowledge/_lessons.md
+```
+
+Lessons are hypotheses about how to plan better in this codebase, produced by `/memo` Phase 6. Match by `trigger` field (domain tag, file glob, or keyword set). If no file or no match, skip silently. Ignore any hit whose context falls under the `## Archive` heading — those lessons are pruned and not active. For each hit, surface the `lesson` as a planning constraint:
+- **risk-miss** lessons → Key Assumptions & Risks (known trap)
+- **scope-miss** lessons → Scope (explicit inclusion)
+- **approach-wrong** lessons → Technical Context (reject the rejected approach up front)
+- **quality-gap** / **estimation-miss** lessons → Key Assumptions & Risks (calibration)
+
 Integrate domain knowledge into the feature body as you write each section — don't dump it wholesale:
 - **5. Constraints** → carry forward into Success Criteria (as guardrails) and Key Assumptions & Risks
 - **2. Decisions** → reference in Technical Context. If the new feature needs to override a past decision, state explicitly: what the prior decision was, why it no longer holds, and what replaces it
@@ -96,6 +108,12 @@ What must be true for this approach to work? Known scope traps, technical unknow
 
 ## Technical Context
 Architectural decisions, patterns, files affected.
+
+## Lessons Applied
+<!-- Include this section only when Step 3 "Planning-lessons lookup" returned hits.
+     One line per retrieved lesson, stating the class and exactly where it shaped the plan.
+     If no lessons were retrieved, omit the section entirely — do not write "none". -->
+- **[Lesson title]** (class) → reflected in *[Section name]* as "<specific sentence or bullet added because of this lesson>"
 
 ## Sub-Features
 <!-- Populated in Phase 3 -->

@@ -149,7 +149,7 @@ cat planwise/knowledge/<domain>.md
 
 Launch **3 subagents in one message** — each analyzes the gathered material through a different lens. If an existing knowledge file was found, each subagent receives it alongside the feature material and produces **merged** output.
 
-Every subagent receives the Writing Principles (Phase 0) as part of its prompt. Every entry must follow these principles — reject subagent output that violates them.
+Every subagent receives the Writing Principles (see top of this file) as part of its prompt. Every entry must follow these principles — reject subagent output that violates them.
 
 ### Merge protocol
 
@@ -614,7 +614,128 @@ Retrieval: `grep -i "<keyword>" planwise/knowledge/INDEX.md` → find domain + s
 
 One block per domain. If the domain already has an entry, update all lines (summary, tags, and entry titles). Maintain alphabetical order by domain name. Entry titles must match the bold titles in the domain file exactly — they are grep targets.
 
-## Phase 6: Report
+## Phase 6: Plan retrospective
+
+Distill generalizable planning lessons from this feature's execution signals. Output target: `planwise/knowledge/_lessons.md` — a separate artifact consumed only by `/plan` and `/brief` (leading `_` sorts it apart from domain files and keeps it out of the domain-concept grep path). Lessons are hypotheses about how to plan better in this codebase; they strengthen through confirmation and graduate into domain knowledge when proven.
+
+This phase uses the same evidence gathered in Phase 2 but reads it through a planning-defect lens — not domain truth. Never duplicate entries across `_lessons.md` and the domain file.
+
+### Step 1: Collect convergence signals
+
+Re-read the Phase 2 material and tag each finding with its signal class. Record signal → root-cause mappings:
+
+- **scope-miss** — sub-features added after the original plan was approved (plan under-scoped)
+- **risk-miss** — bug sub-features filed during implementation (Key Assumption violated at runtime)
+- **approach-wrong** — `jj op log` abandons, reverts, or `jj op log --patch` shows discarded approaches on the same file/concept
+- **quality-gap** — optimize verdict `stuck`, or UAT failures tied to untested plan assumptions
+- **estimation-miss** — sub-features requiring >1 rework cycle (visible in op log as repeated rewrites on the same change-id)
+
+### Step 1.5: Score applied lessons (usefulness feedback)
+
+Before clustering new signals, measure whether lessons retrieved by the *originating plan* actually prevented the defects they claimed to guard against. This is the retrieval-usefulness loop — without it, pruning is age-based, not quality-based.
+
+```bash
+planwise view $ARGUMENTS
+```
+
+Extract the `## Lessons Applied` block from the feature body (populated by `/plan` Phase 1 Step 3). If the block is absent, skip this step — no lessons were retrieved for this feature.
+
+For each lesson entry in the block:
+
+1. **Look up the lesson** in `planwise/knowledge/_lessons.md` by its title.
+   - If not found (already archived or promoted to a domain file) → skip silently, continue to next.
+2. **Determine the claim class** from the entry's `class:` field.
+3. **Check this run's Step 1 signals.** If the claimed class appears in the convergence signals collected from this feature:
+   - Lesson was applied **and the defect class still occurred** → the lesson did not prevent what it claimed.
+   - Bump `failed_applications` by 1.
+4. **If the claimed class does NOT appear in signals:**
+   - Lesson was applied **and the defect class did not occur** → the lesson plausibly worked for this feature.
+   - Bump `successful_applications` by 1.
+5. In both cases, update the entry's `last_seen` to today's date.
+
+Record the per-lesson usefulness verdicts for the Phase 7 report. Do not dedupe or prune yet — Step 4 applies the updated counters.
+
+**Note:** `successful_applications` is a weak signal — absence of a defect class could mean the lesson worked, or simply that the feature did not exercise the risk. It is still a better signal than no measurement. `failed_applications` is a strong signal — the lesson was applied and the defect it promised to prevent happened anyway.
+
+### Step 2: Cluster and gate
+
+Group signals by root cause. Apply the gate:
+
+- A candidate lesson requires **≥2 signals of different classes** pointing to the same root cause. Single-class or single-signal clusters = normal adaptation, **discard**.
+- Reject candidates that:
+  - restate rules already in CLAUDE.md or project rulesets
+  - are feature-specific ("remember X in feat-042") — lessons must generalize
+  - describe domain truth — those belong in the Phase 3-4 domain file, not here
+
+Default to discarding. The gate exists to prevent the lessons file from becoming a write-only journal. **If no candidate survives the gate, say "Nothing to save." and skip the remaining steps — this is a valid and expected outcome.**
+
+### Step 3: Read existing lessons and dedupe
+
+```bash
+test -f planwise/knowledge/_lessons.md && cat planwise/knowledge/_lessons.md
+```
+
+For each candidate that passed the gate:
+
+- If an existing active entry has a matching `trigger` and semantically equivalent `lesson` → **bump `confirmations`**, append the current feature id to `evidence`, update `last_seen` to today's date. Do **not** add a new entry.
+- Else → stage a new entry for Step 5.
+
+### Step 4: Apply promotion and pruning
+
+**Promote:** any active entry where `successful_applications >= 3 AND failed_applications == 0` AND whose `trigger` is scoped to a single domain — rewrite it as a Decision or Gotcha in that domain file (using the Phase 3 writing principles) and remove it from `_lessons.md`. Promotions are listed in the Phase 7 report. Meta graduates to canonical only when the lesson has demonstrably prevented its claimed defect class across multiple features. **Do NOT promote on `confirmations` alone** — re-discovery means the bug keeps happening, not that the lesson works.
+
+**Prune — quality-driven (strong signal):** move any entry where `failed_applications > successful_applications` into the `## Archive` section immediately, regardless of age. The lesson was applied and the defect it claimed to prevent happened anyway — it's net-harmful or wrong. Archiving it removes noise and prevents future plans from being biased by a bad hypothesis. Record the archival reason as `net failure: F failed / S successful`.
+
+**Prune — age-driven (safety net for never-retrieved lessons):** move entries with `confirmations: 1 AND successful_applications == 0 AND failed_applications == 0` where `(current_feature_number - first_evidence_feature_number) >= 10` into `## Archive`. These lessons have never been retrieved and never been re-confirmed — untested dead weight. Record the archival reason as `untriggered >= 10 features`.
+
+Archived entries are kept for audit but excluded from the `/plan` grep path (consumers grep the `## Active` section only).
+
+**Size cap (forces consolidation):** the `## Active` section holds at most **40 entries**. If adding the new lessons would exceed the cap, do NOT append — instead, before writing, consolidate: merge semantically overlapping entries (preserve the higher `confirmations` and union the `evidence` lists) or archive the lowest-`confirmations` entries first. The cap is a quality ratchet — it forces the distiller to think about which lessons actually matter rather than accumulating indefinitely.
+
+### Step 5: Write `_lessons.md`
+
+If the file does not exist, create it with this header:
+
+```markdown
+# Planning Lessons
+
+Hypotheses about how /plan and /brief should approach work in this codebase, distilled from execution signals by /memo Phase 6. Consumed by /plan Phase 1 and /brief Phase 1. Lessons strengthen through confirmation and graduate into domain knowledge at confirmations >= 3.
+
+Retrieval: grep -i -B1 -A5 "<keyword-or-domain-tag>" planwise/knowledge/_lessons.md
+
+## Active
+```
+
+Entry format (one block per lesson, under `## Active`):
+
+```markdown
+- **[Lesson title]**
+  - trigger: <domain-tag> | <file-glob> | <keyword-list>
+  - class: <scope-miss | risk-miss | approach-wrong | quality-gap | estimation-miss>
+  - lesson: <one sentence, generalizable, concrete, evergreen>
+  - evidence: [feat-NNN, feat-MMM, ...]
+  - confirmations: N
+  - successful_applications: N   # retrieved in a plan, defect class did NOT recur in that feature's memo
+  - failed_applications: N       # retrieved in a plan, defect class DID recur — lesson did not work
+  - first_seen: YYYY-MM-DD
+  - last_seen: YYYY-MM-DD
+```
+
+Append an `## Archive` section at the bottom for pruned entries (same format). Preserve existing entries not touched by this run.
+
+### Step 6: Quality gate
+
+Before writing, verify:
+
+- Every lesson names a concrete `trigger` — a domain tag, file glob, or keyword set a future `/plan` can actually grep. No "general advice" triggers.
+- Every `lesson` is one sentence, present tense, evergreen — no temporal references, no feature-specific framing.
+- Every lesson carries a `class` tag so `/plan` knows which section to route it into.
+- No lesson duplicates a rule in CLAUDE.md or an entry in the domain file written in Phase 4.
+- All promotions are completed (domain file updated, entry removed from `_lessons.md`) before writing.
+
+If zero lessons survive the gate, write nothing to `_lessons.md` and note "Nothing to save." in the Phase 7 report. After consolidation, the `## Active` section must not exceed 40 entries.
+
+## Phase 7: Report
 
 ```
 Knowledge base updated for Feature $ARGUMENTS.
@@ -637,7 +758,20 @@ Quality gate: all checks passed
 
 Tags: <tag1>, <tag2>, <tag3>
 
+Planning lessons (planwise/knowledge/_lessons.md):
+  Signals collected:   N (scope-miss=A, risk-miss=B, approach-wrong=C, quality-gap=D, estimation-miss=E)
+  Usefulness feedback (from originating plan's Lessons Applied):
+    Applied:           N lessons retrieved and referenced in the plan
+    Successful:        N (defect class did not recur — list titles)
+    Failed:            N (defect class recurred despite lesson — list titles with reason)
+  Lessons added:       N new entries
+  Lessons confirmed:   N existing entries strengthened (list titles with new confirmations count)
+  Lessons promoted:    N entries graduated into domain files (successful_applications>=3, failed==0 — list title → target section)
+  Lessons archived:    N (net failure: F | untriggered age: A — list titles with reason)
+  Outcome (if none):   "No lessons extracted — signals did not converge"
+
 This knowledge is available as context for future /plan sessions.
 To browse: grep -n '^## [0-9]' planwise/knowledge/<domain>.md
 To search: grep -i "<keyword>" planwise/knowledge/INDEX.md
+To review lessons: grep -i "<trigger>" planwise/knowledge/_lessons.md
 ```
