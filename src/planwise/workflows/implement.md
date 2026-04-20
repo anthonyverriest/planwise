@@ -1,10 +1,10 @@
 ---
-description: "Implement all coding sub-features for an feature (automated mode)"
+description: "Implement all coding sub-features for a feature (automated mode)"
 ---
 
 # Implement Full Feature (Automated)
 
-Implement all coding sub-features for an feature following its dependency graph.
+Implement all coding sub-features for a feature following its dependency graph.
 
 ## Target: Feature $ARGUMENTS
 
@@ -141,7 +141,8 @@ Use this prompt structure for all implementation subagents:
         git rev-parse HEAD
       Report the resulting `<commit-hash>` — the main agent uses it for the n-way jj merge after importing refs.
 
-      Commit types: feat, fix, ref, test, docs, chore, style. Use imperative mood, focus on outcomes.
+      Commit types: feat, fix, ref, docs, chore, style. Use imperative mood, focus on outcomes.
+      Reserved workflow prefixes — do NOT use from /implement: `test:` (emitted by /test, greppable signal for /memo Phase 2) and `optimize:` (emitted by /optimize, greppable signal for /memo Phase 2). These live in the commit subject so /memo can discover them without parsing bodies.
    7. Report back with a status, summary, and evidence. Include the **handle** from step 6 (a jj change-id if you ran serially, a git commit hash if you ran in an isolated worktree):
       - DONE — what was implemented, files changed, **handle**. Paste test output as evidence if applicable.
       - DONE_WITH_CONCERNS — implemented, but something feels wrong or fragile. Describe the concern. Include **handle**. Paste test output as evidence if applicable.

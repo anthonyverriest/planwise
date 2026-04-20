@@ -329,7 +329,7 @@ Report:
 After each agent returns:
 
 1. **Type check:**
-   Run the project's type checker on the test code (e.g., `uv run mypy` or the equivalent from `/check`).
+   Run the project's type checker on the test code (e.g., `uv run mypy`).
    Fix type errors in test code only. If a fix requires changing production code, skip that test and record as DEFERRED.
 
 2. **Run the new tests** (adapt command to what was written):
@@ -350,11 +350,7 @@ After each agent returns:
 
 ## Phase 6: Verify
 
-Run the full check suite:
-
-```
-/check
-```
+Run the project's full typecheck, lint, and test suite.
 
 - **All green** → proceed to report.
 - **Failures in adversarial tests** → type errors: fix the test. Assertion failures in skip/ignore-annotated tests: expected, verify annotation is correct.

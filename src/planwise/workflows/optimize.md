@@ -135,11 +135,7 @@ echo "$BASELINE_OP" > .jj-optimize-baseline-op
 
 Snapshot created via the jj operation log. If optimize goes wrong at any point: `jj op restore "$(cat .jj-optimize-baseline-op)" && rm .jj-optimize-baseline-op` — this rewinds the entire repo state (all changes made since the snapshot are undone atomically).
 
-Verify checks pass before starting — don't optimize broken code:
-
-Run the project's check command (typecheck, lint, test). If the project defines a `/check` command, use that. Otherwise, identify and run the appropriate commands for the project's language/framework.
-
-If checks fail → stop. Fix first, then re-run `/optimize`.
+Verify the project's typecheck, lint, and test commands pass before starting — don't optimize broken code. If they fail → stop. Fix first, then re-run `/optimize`.
 
 Initialize:
 
@@ -331,7 +327,7 @@ After each fix agent returns, **commit immediately** — jj's auto-snapshot has 
    PRE_COMMIT_OP=$(jj op log --limit 1 --no-graph -T 'id.short()')
    jj commit -m "optimize: fix [brief description]"
    ```
-4. Run the project's check command (typecheck, lint, test). If the project defines a `/check` command or documents its check process in CLAUDE.md, use that. Otherwise, identify and run the appropriate commands for the project's language/framework.
+4. Run the project's typecheck, lint, and test commands.
 
 **Pass:** record in ledger with outcome `committed` and list `affected_files`. Increment `total_commits`.
 
@@ -382,7 +378,7 @@ Steps:
    jj commit -m "optimize: evolve — [proposal title]"
    ```
 
-4. Run the project's check command (typecheck, lint, test). If the project defines a `/check` command, use that. Otherwise, identify and run the appropriate commands for the project's language/framework.
+4. Run the project's typecheck, lint, and test commands.
 
 5. **Pass:** record in ledger with outcome `committed` and `affected_files`. Increment `total_commits`.
 

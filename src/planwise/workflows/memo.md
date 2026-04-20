@@ -46,6 +46,19 @@ planwise view $ARGUMENTS --field status
 - Type must be `feature`. If not → stop: `$ARGUMENTS is not a feature.`
 - Status must be `done` or `in-review`. If `in-review`, warn: `Feature $ARGUMENTS is in-review, not done. Proceeding — knowledge may be incomplete.` Any other status → stop: `Feature $ARGUMENTS is not complete (status: <status>). Finish the feature first.`
 
+**Evidence check (warn-only, never block):**
+
+```bash
+TEST_COMMITS=$(jj log -r 'description(glob:"test:*") & dev@origin..@' --no-graph -T 'change_id.short() ++ "\n"' | wc -l)
+OPT_COMMITS=$(jj log -r 'description(glob:"optimize:*") & dev@origin..@' --no-graph -T 'change_id.short() ++ "\n"' | wc -l)
+```
+
+- Both zero → emit: `Thin evidence: no test: or optimize: commits found for this feature. Distillation will rely on implementation commits and op-log only; Phase 6 cluster gate (≥2 signal classes) may under-trip.`
+- Exactly one zero → emit: `Partial evidence: no <test|optimize> commits found. The <quality-gap|approach-wrong> signal class will be absent from Phase 6.`
+- Both present → proceed silently.
+
+Record the evidence state for Phase 7 — the report carries it forward so future /memo runs know the KB entry was built on partial signal.
+
 ## Phase 1.5: Scale gate
 
 Right-size the pipeline to the feature. Read once:
@@ -717,6 +730,7 @@ Reflection findings go to the Phase 7 report only. No automatic file changes in 
 Knowledge base updated for Feature $ARGUMENTS.
 
 Scale:   <trivial | standard | large>
+Evidence: test=<N commits> optimize=<N commits>  <full | partial (<missing class>) | thin>
 Domain:  <domain-name> (or list if Large split)
 File:    planwise/knowledge/<domain>.md
 Twin:    planwise/knowledge/<domain>.jsonl (N entries)

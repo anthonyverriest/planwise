@@ -147,9 +147,9 @@ For bug fixes: demonstrate the test fails without the fix and passes with it. Th
 
 If the spec's Implementation Notes includes a Validation command, run it first — this is the spec-specific verification (may differ from the project's general checks).
 
-Then run the project's check command (typecheck, lint, test). If the project defines a `/check` command, use that.
+Then run the project's typecheck, lint, and test commands.
 
-If checks fail, fix and re-run. If a failure is in code you didn't write, stop and report.
+If they fail, fix and re-run. If a failure is in code you didn't write, stop and report.
 
 ### Acceptance criteria self-check
 
