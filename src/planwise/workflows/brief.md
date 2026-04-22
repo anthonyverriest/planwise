@@ -199,6 +199,17 @@ echo "<task body from Phase 1>" | planwise create task "[Task] <keyword title>"
 planwise status <task-slug> ready
 ```
 
+### Anchor the planning bookmark
+
+Issue-file edits produced by this run need somewhere to land. Anchor a `plan/<task-slug>` bookmark on the highest non-empty change so the epilogue publishes the planning commits:
+
+```bash
+PLAN_HEAD=$(jj log -r 'heads(dev@origin..@ ~ empty())' --no-graph -T 'change_id.short()' --limit 1)
+jj bookmark create plan/<task-slug> -r "$PLAN_HEAD" || jj bookmark set plan/<task-slug> -r "$PLAN_HEAD"
+```
+
+If the revset returns empty (no file edits — the run upgraded an existing ready issue in-place), skip this step.
+
 ### Report
 
 ```

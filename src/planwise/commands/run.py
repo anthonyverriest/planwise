@@ -11,46 +11,79 @@ from planwise.workflows import expand_workflow, list_workflows
 
 
 WORKFLOW_EPILOGUE = """\
-## Final commit
+## Final reconcile and publish
 
-If another parallel workspace may have rewritten a change this workspace touched,
-reconcile first (no-op if nothing is stale):
+Three guarded steps — each only fires when its precondition holds, so no
+empty commits, no silent no-op pushes, no duplication with the workflow body.
+
+### Step 1 — Reconcile workspace with shared backend
 
 ```bash
 jj workspace update-stale
 ```
 
-After completing all steps, commit any remaining changes (including issue status moves),
-rebase onto the latest `dev`, and push the current bookmark:
+No-op unless another `pw claude` workspace rewrote a change this workspace
+touches. Always safe to run.
+
+### Step 2 — Commit trailing working-copy edits (conditional)
+
+Workflows that commit inline (task, implement, test, optimize) usually leave
+a clean working copy here. Planning workflows (plan, brief, bug, memo) leave
+issue-file or knowledge-file edits from `planwise create` / `planwise status`
+that still need committing. Guard so the common case produces no empty change:
 
 ```bash
-jj commit -m "<type>: <describe what changed>"
-# Commit types: feat, fix, ref, test, docs, chore, style
+if [ -n "$(jj diff --name-only)" ]; then
+  jj commit -m "<type>: <describe trailing edit>"
+fi
+```
+
+Commit types: feat, fix, ref, test, docs, chore, style. Use imperative mood.
+
+### Step 3 — Fetch and rebase onto trunk
+
+```bash
 jj git fetch
 jj rebase -d dev@origin
 ```
 
-**Check for rebase conflicts** — unlike git, jj records conflicts inline as first-class data
-in the rebased changes rather than aborting:
+Unlike git, jj records rebase conflicts inline as first-class data rather
+than aborting. Always check afterwards:
 
 ```bash
 jj resolve --list
 ```
 
-If conflicted paths are reported, resolve them inline before pushing:
+If conflicted paths are reported, resolve inline before pushing:
 
-1. Read each conflicted file — jj has materialized `<<<<<<<` / `|||||||` / `=======` / `>>>>>>>` markers.
-2. Edit the file to produce a coherent unified result. The working copy is auto-snapshotted.
+1. Read each conflicted file — jj has materialized `<<<<<<<` / `|||||||` /
+   `=======` / `>>>>>>>` markers.
+2. Edit the file to produce a coherent unified result. The working copy is
+   auto-snapshotted.
 3. Confirm `jj resolve --list` reports no remaining conflicts.
 
-Then push:
+### Step 4 — Publish reachable bookmarks (conditional)
+
+Collect every non-trunk bookmark on the stack between `dev@origin` and `@`,
+then push them together with `--allow-new` so first-time bookmarks publish
+on their initial push. If no eligible bookmark exists, skip with an explicit
+message rather than silently no-op:
 
 ```bash
-jj git push
+BOOKMARKS=$(jj bookmark list -r '::@ ~ ::dev@origin' \\
+  --no-graph -T 'name ++ "\\n"' | grep -v '^dev$' | grep -v '^$')
+
+if [ -n "$BOOKMARKS" ]; then
+  ARGS=""
+  for b in $BOOKMARKS; do ARGS="$ARGS --bookmark $b"; done
+  jj git push --allow-new $ARGS
+else
+  echo "No local bookmark on this stack — commits stay local. Create a bookmark to publish."
+fi
 ```
 
-jj auto-snapshots the working copy — no staging area. The colocated git repo stays in sync,
-so CI and the remote see conventional git commits.
+jj auto-snapshots the working copy — no staging area. The colocated git repo
+stays in sync, so CI and the remote see conventional git commits.
 """
 
 

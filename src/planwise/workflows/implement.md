@@ -267,9 +267,8 @@ Retrospective:
 - Wrong assumption or surprise: <X>
 - Next time: <Y>
 
-Next steps:
-1. Push:      jj git push --bookmark feat/<topic>
-2. PR (copy-run — the --body is the review tour from Step 4.5):
+Next steps (bookmark is published by the epilogue):
+1. PR (copy-run — the --body is the review tour from Step 4.5):
 
      gh pr create --base dev --head feat/<topic> \
        --title "<feature title>" \
@@ -278,9 +277,9 @@ Next steps:
      EOF
      )"
 
-3. Verify open bug fixes; close when satisfied.
-4. Work the UAT checklist; close UAT and feature when green.
-5. After merge, free the workspace (name was echoed when `pw claude` created it):
+2. Verify open bug fixes; close when satisfied.
+3. Work the UAT checklist; close UAT and feature when green.
+4. After merge, free the workspace (name was echoed when `pw claude` created it):
      cd <main repo root>
      jj workspace forget <workspace-name>
      rm -rf <workspace path>

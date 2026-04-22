@@ -30,7 +30,7 @@ If the input describes a problem or bug, ask "Why?" to trace from symptom to roo
 
 ### Dispatch — KB retriever (Explore, quick)
 
-> Read `src/planwise/workflows/_plan/phase1_plan.md` § **Knowledge base lookup**. Execute it against keywords: `<user request keywords>`. Return the structured summary the protocol describes.
+> Read `src/planwise/workflows/_plan/analyze.md` § **Knowledge base lookup**. Execute it against keywords: `<user request keywords>`. Return the structured summary the protocol describes.
 
 Integrate the return into the feature body as you draft each section. Carry the Lessons list forward for the Pre-creation checklist.
 
@@ -86,7 +86,7 @@ For each sub-feature, also determine:
 
 After Technical Context is drafted:
 
-> Read `src/planwise/workflows/_plan/phase1_plan.md` § **Verify assumptions**. Verify these claims: `<file paths, function signatures, schema names, CLAUDE.md references from the draft Technical Context>`. Return corrections.
+> Read `src/planwise/workflows/_plan/analyze.md` § **Verify assumptions**. Verify these claims: `<file paths, function signatures, schema names, CLAUDE.md references from the draft Technical Context>`. Return corrections.
 
 Apply corrections to the feature body before presenting.
 
@@ -98,11 +98,11 @@ Dispatch in parallel:
 
 ### Dispatch — Impact analyzer (Explore, medium)
 
-> Read `src/planwise/workflows/_plan/phase2_challenge.md` § **Impact analysis**. Execute against Technical Context: `<file list, types, schemas, interfaces>`. KB Connections from Phase 1 (if any): `<connections>`. Return the downstream-consumer table.
+> Read `src/planwise/workflows/_plan/challenge.md` § **Impact analysis**. Execute against Technical Context: `<file list, types, schemas, interfaces>`. KB Connections from Phase 1 (if any): `<connections>`. Return the downstream-consumer table.
 
 ### Dispatch — Red team (general-purpose, fresh context)
 
-> Read `src/planwise/workflows/_plan/phase2_challenge.md` § **Pre-mortem + Risk stress-test**. Input — feature body + sub-feature list:
+> Read `src/planwise/workflows/_plan/challenge.md` § **Pre-mortem + Risk stress-test**. Input — feature body + sub-feature list:
 > ```
 > <paste verbatim>
 > ```
@@ -159,7 +159,7 @@ Adjust to the feature's actual scope. For small features (1-2 layers), use 1-2 a
 
 Each prompt:
 
-> Read `src/planwise/workflows/_plan/phase3_create.md` § **Pattern bank extraction**. Your slice: `<slice description + file hints>`. Return findings per the protocol.
+> Read `src/planwise/workflows/_plan/create.md` § **Pattern bank extraction**. Your slice: `<slice description + file hints>`. Return findings per the protocol.
 
 Compile the returns into a single **pattern bank** held in main thread. This is the one unavoidable main-thread context cost — downstream subagents consume from it.
 
@@ -167,7 +167,7 @@ Compile the returns into a single **pattern bank** held in main thread. This is 
 
 #### Dispatch — Buildability reviewer (Explore, quick)
 
-> Read `src/planwise/workflows/_plan/phase3_create.md` § **Buildability review**. Pattern bank: `<paste>`. Sub-feature list: `<paste>`. Return per-sub-feature Constraint additions.
+> Read `src/planwise/workflows/_plan/create.md` § **Buildability review**. Pattern bank: `<paste>`. Sub-feature list: `<paste>`. Return per-sub-feature Constraint additions.
 
 Merge returned Constraints into each sub-feature's Constraints block when its body is written in Step 2.
 
@@ -177,7 +177,7 @@ For each sub-feature, dispatch one subagent:
 
 #### Dispatch — Sub-feature body writer (general-purpose)
 
-> Read `src/planwise/workflows/_plan/phase3_create.md` § **Sub-feature body writer**. Inputs:
+> Read `src/planwise/workflows/_plan/create.md` § **Sub-feature body writer**. Inputs:
 > - Sub-feature: `<title, one-line scope, agent approach, dependencies>`
 > - Feature slug: `<feature-slug>`
 > - Relevant pattern-bank snippets: `<paste subset>`
@@ -247,7 +247,18 @@ planwise edit <feature-slug> --body "<updated body>"
 
 The dependency graph drives execution order — `/implement` uses `ready` to determine what to work on next.
 
-### Step 5 — Report
+### Step 5 — Anchor the planning bookmark
+
+Issue-file edits produced by this run need somewhere to land. Anchor a `plan/<feature-slug>` bookmark on the highest non-empty change so the epilogue publishes the planning commits:
+
+```bash
+PLAN_HEAD=$(jj log -r 'heads(dev@origin..@ ~ empty())' --no-graph -T 'change_id.short()' --limit 1)
+jj bookmark create plan/<feature-slug> -r "$PLAN_HEAD" || jj bookmark set plan/<feature-slug> -r "$PLAN_HEAD"
+```
+
+If the revset returns empty (no commits in this run — e.g. the run upgraded an existing ready issue without any file edits), skip this step; the epilogue's conditional push will emit the no-bookmark message.
+
+### Step 6 — Report
 
 ```
 Feature: <N> — [Feature] <title>

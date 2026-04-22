@@ -289,7 +289,6 @@ Retrospective: [one sentence — what assumption was wrong or what you'd do diff
 
 Bookmark: task/<topic> (head: $TASK_HEAD)
 
-Next steps:
-1. Push: jj git push --bookmark task/<topic>
-2. Open the PR: gh pr create --base dev --head task/<topic> --title "<title>" --body "Closes #$ARGUMENTS"
+Next steps (bookmark is published by the epilogue):
+1. Open the PR: gh pr create --base dev --head task/<topic> --title "<title>" --body "Closes #$ARGUMENTS"
 ```

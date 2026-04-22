@@ -544,6 +544,17 @@ Dispatch one subagent:
 
 Reflection findings go to the Phase 7 report only. No automatic file changes in this phase — cross-domain edits happen in subsequent human-directed work (a follow-up feature, a dedicated consolidation task).
 
+## Phase 6.9: Anchor the memo bookmark
+
+Knowledge-file edits produced by this run need somewhere to land. Anchor a `memo/<domain>` bookmark on the highest non-empty change so the epilogue publishes the memo commits:
+
+```bash
+MEMO_HEAD=$(jj log -r 'heads(dev@origin..@ ~ empty())' --no-graph -T 'change_id.short()' --limit 1)
+jj bookmark create memo/<domain> -r "$MEMO_HEAD" || jj bookmark set memo/<domain> -r "$MEMO_HEAD"
+```
+
+If the revset returns empty (no knowledge changes — distillation produced no deltas), skip this step.
+
 ## Phase 7: Report
 
 ```

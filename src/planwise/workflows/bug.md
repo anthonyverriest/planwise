@@ -268,6 +268,15 @@ Promote to ready so `/implement` will pick it up:
 planwise status <new-slug> ready
 ```
 
+### Anchor the bug bookmark
+
+The failing-test commit and the bug issue file need somewhere to land. Anchor a `bug/<new-slug>` bookmark on the highest non-empty change so the epilogue publishes them:
+
+```bash
+BUG_HEAD=$(jj log -r 'heads(dev@origin..@ ~ empty())' --no-graph -T 'change_id.short()' --limit 1)
+jj bookmark create bug/<new-slug> -r "$BUG_HEAD" || jj bookmark set bug/<new-slug> -r "$BUG_HEAD"
+```
+
 ### Report
 
 ```
