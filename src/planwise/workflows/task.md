@@ -6,6 +6,8 @@ description: "Execute a task — implement, test, optimize, and memo in one pass
 
 Implement a task issue following its spec, then test, optimize, and update the knowledge base. One pass, no subagents.
 
+**Assumed context:** this workflow runs inside a fresh jj workspace created by `pw claude`. Concurrent `/task` runs are isolated by workspace — each `pw claude` session has its own `@`. No cross-session contention.
+
 ## Target: $ARGUMENTS
 
 ## Step 1: Read the task
@@ -28,44 +30,19 @@ Move to in-progress:
 planwise status $ARGUMENTS in-progress
 ```
 
-## Step 1.5: Base the task change
+## Step 1.5: Describe the task change
 
-Work **anonymously via change-id** during iteration — a named bookmark is only anchored at the end (Step 7). If the task is abandoned, no bookmark churn.
-
-Check if an in-progress task change for this slug already exists (from a previous `/task` run). Tasks are identified by the slug suffix `(#$ARGUMENTS)` in their description; select the latest one not yet merged into `dev@origin`:
+The workspace is already a fresh change off `dev@origin` (created by `pw claude`). Describe it so history and later history-mining workflows can find it by slug:
 
 ```bash
-jj log -r 'description(glob:"*(#'"$ARGUMENTS"')*") & ~::dev@origin' --limit 1 -T 'change_id.short()'
+jj describe -m "<type>: <short description> (#$ARGUMENTS)"
 ```
 
-- **Change exists:** switch to it.
-  ```bash
-  jj edit <change-id>
-  ```
-
-- **No change yet:** create a new change. If `@` is already on a feature change (descended from `dev@origin` but not equal to it), branch off `@` so the task lands on the feature. Otherwise, base off the latest `dev`.
-  ```bash
-  jj git fetch
-  # On a feature change? (check returns non-empty if @ is a descendant of dev@origin but not dev@origin itself)
-  jj log -r '@ & (dev@origin..)' --no-graph -T 'change_id.short()'
-  # If non-empty: jj new -m "<type>: <short description> (#$ARGUMENTS)"
-  # If empty:     jj new dev@origin -m "<type>: <short description> (#$ARGUMENTS)"
-  ```
+Commit types: feat, fix, ref, test, docs, chore, style. Use imperative mood.
 
 Record a kebab-case topic derived from the task title — used in Step 7 as the bookmark name.
 
-**Stale-trunk check:** if this task change is based on `dev@origin` and the remote has advanced (`jj git fetch` pulled new commits), rebase before working: `jj rebase -d dev@origin`. jj records conflicts as data, so rebase does not fail mid-flight.
-
-After rebase, check for conflicts:
-```bash
-jj resolve --list
-```
-
-For each conflicted path: Read the file, `jj show` the trunk change that introduced the conflicting side to recover intent, then classify:
-- **Mechanical** (imports, formatting, non-overlapping additions, one-side deletes) → resolve inline.
-- **Semantic** (both sides changed the same logic with different intent) → STOP, show the user the conflicted paths and both sides, ask which intent to keep. Do not guess.
-
-`jj status` must report no remaining conflicts before continuing.
+If you are resuming an older workspace and `dev@origin` has advanced, the final-commit epilogue handles the rebase and any conflict resolution at push time — no mid-flow rebase needed here.
 
 ## Step 1.6: Planning-lessons lookup
 
@@ -157,11 +134,21 @@ Before committing, re-read the spec's Acceptance Criteria. Verify each criterion
 
 ## Step 4: Commit
 
+One intent per commit — implementation and tests land as two commits so the PR reads as `<type>:` + `test:`, not one mixed change. jj auto-snapshot already has both in the working copy; explicit paths split them cleanly without staging.
+
+Step 1.5 already set the implementation description. Close it with a bare `jj commit`, passing only the non-test paths so tests stay in the working copy:
+
 ```bash
-jj commit -m "<type>: <description> (#$ARGUMENTS)"
+jj commit <non-test-paths>
 ```
 
-jj auto-snapshots the working copy — no staging. `jj commit` closes the current change and starts a new empty one on top.
+If scope shifted during implementation and the Step 1.5 description no longer fits, `jj describe -m "<type>: <new description> (#$ARGUMENTS)"` before this commit.
+
+Then commit the tests:
+
+```bash
+jj commit -m "test: <what was tested> (#$ARGUMENTS)"
+```
 
 Commit types: feat, fix, ref, test, docs, chore, style. Use imperative mood, focus on outcomes.
 
@@ -216,7 +203,7 @@ Re-run checks. If checks pass, commit separately — pass explicit paths so unre
 jj commit <modified-files> -m "optimize: <what was improved> (#$ARGUMENTS)"
 ```
 
-If checks fail after an optimize fix, revert the change (`jj restore <files>`) and move on. Do not loop.
+If checks fail, the optimize edits are still uncommitted in the working copy — discard them with `jj restore <files>` and move on. Do not loop.
 
 If no issues are found or all are trivial: skip. Do not optimize for the sake of optimizing.
 
@@ -261,6 +248,12 @@ grep -i "<domain>" planwise/knowledge/INDEX.md
 If the domain file's summary, tags, or entry titles changed, update the corresponding block in `INDEX.md`. Maintain alphabetical order.
 
 If no updates needed, skip.
+
+If knowledge files were updated, commit them separately so the PR keeps one intent per commit:
+
+```bash
+jj commit planwise/knowledge/ -m "docs: update knowledge for <domain> (#$ARGUMENTS)"
+```
 
 ## Step 7: Anchor bookmark, close, and report
 

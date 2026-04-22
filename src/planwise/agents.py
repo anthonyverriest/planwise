@@ -138,8 +138,6 @@ CLAUDE_PERMISSIONS = [
     "Bash(cd *)",
     "Bash(ls *)",
     "Bash(wc *)",
-    "Bash(pw:*)",
-    "Bash(planwise:*)"
 ]
 
 

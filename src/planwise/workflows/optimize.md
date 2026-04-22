@@ -6,85 +6,11 @@ description: "Codebase evolution engine — optimize, fix, and verify code acros
 
 Hill-climbing to a local optimum: unified analysis finds both problems and opportunities, a self-adversarial challenge refines the plan before execution, fixes land first, then optimizations, the loop repeats on the same scope until nothing improves. Every change is verified by checks (typecheck/lint/test), committed on pass, reverted on fail. On a jj feature change — revert is free via the operation log.
 
+**Assumed context:** this workflow runs inside a fresh jj workspace created by `pw claude`. Concurrent runs are isolated by workspace — each `pw claude` session has its own `@`. No cross-session contention.
+
 ## Dimensions
 
-Each dimension is a **lens** — a distinct expert mindset for finding issues. The lens question is what the analyzer agent should hold in its head; the "what this lens reveals" list is what to look for; the "out of scope" list prevents overlap with other dimensions.
-
-### Dimension 1: Safety
-**Lens question:** "Where could this fail unexpectedly or be exploited?"
-
-**What this lens reveals:**
-- Missing input validation at system boundaries; trust assumptions that don't hold
-- Edge cases (empty/None, boundary values, off-by-one, integer overflow)
-- Race conditions, missing locks, unsafe shared state, unawaited coroutines, swallowed cancellation
-- Swallowed or lost errors, bare excepts, inconsistent error semantics across call sites
-- Resource leaks (file handles, sockets, connections, locks held outside context managers)
-- Injection surfaces (SQL, shell, template, deserialization), secret/PII leakage in logs or errors
-- Deprecated APIs with known security or correctness issues
-
-**Out of scope for this lens:**
-- Style and readability → Quality
-- Module-level coupling → Structure
-- Algorithmic cost → Performance
-
-### Dimension 2: Quality
-**Lens question:** "Could a new contributor read this in 5 minutes and understand intent?"
-
-**What this lens reveals:**
-- Cognitive complexity (deep nesting × control flow breaks — functions hard to reason about)
-- Code smells (long method, large class, feature envy, data clumps, primitive obsession)
-- Low signal density (verbose wrappers, redundant boilerplate, patterns that obscure intent)
-- Duplication and near-duplicates differing only in names/constants
-- Missing or leaky abstractions (logic that belongs in a shared function/class)
-- Dead code (unreachable branches, unused imports/variables/functions, stale feature flags)
-- Magic numbers and hardcoded strings scattered through logic
-- Naming inconsistencies (same concept under different names; names that don't match behavior)
-- Pattern inconsistencies (same operation implemented differently across call sites — the outlier is usually the drift; align to the majority pattern unless the majority is wrong)
-- Convention violations relative to surrounding code or project rules
-
-**Out of scope for this lens:**
-- Module boundaries and inter-file structure → Structure
-- Runtime cost of patterns → Performance
-- Bugs that only fire in edge cases → Safety
-
-### Dimension 3: Structure
-**Lens question:** "If a likely future change lands here, how many files would have to move?"
-
-**What this lens reveals:**
-- Layering violations (domain logic in infrastructure; infrastructure in handlers)
-- Circular or unnecessary dependencies between modules
-- Change coupling (files that always change together reveal hidden dependencies)
-- Afferent/efferent coupling extremes (too many dependents = fragile; too many dependencies = unstable)
-- Low cohesion (classes/modules with split responsibilities — high LCOM)
-- Connascence (shared assumptions between modules that make changes ripple)
-- God classes/modules with too many responsibilities
-- Missing or misplaced boundaries (logic that should live behind an interface/protocol)
-- Coupling to concrete implementations where abstraction is warranted
-- Deep inheritance hierarchies where composition is simpler
-- Observability gaps at architectural boundaries (missing structured logging, metrics, tracing)
-
-**Out of scope for this lens:**
-- Within-function complexity → Quality
-- Error handling correctness → Safety
-- Latency or throughput characteristics → Performance
-
-### Dimension 4: Performance
-**Lens question:** "What's the hot path doing that it shouldn't?"
-
-**What this lens reveals:**
-- Hot paths with unnecessary allocations or copies
-- Missing or incorrect caching (stale cache, unbounded growth, invalidation gaps)
-- Suboptimal concurrency (event loop blocked by sync I/O, missing parallelism for independent I/O)
-- O(n²) or worse algorithms where O(n log n) or O(n) alternatives exist
-- Unnecessary serialization/deserialization round-trips
-- Database query patterns (N+1 queries, missing indexes implied by patterns, unbounded result sets)
-- Wasted I/O (reading the same file/key multiple times in one operation)
-
-**Out of scope for this lens:**
-- Resource leaks (correctness concern) → Safety
-- Code duplication → Quality
-- Module coupling → Structure
-
+Four lenses run in parallel during analysis: **Safety**, **Quality**, **Structure**, **Performance**. Each is a distinct expert mindset with its own lens question, "what this lens reveals" list, and "out of scope" list. Full definitions live in `src/planwise/workflows/_optimize/analyze.md § **Dimensions**` — the analyzer subagents read them directly.
 
 ## Evaluator lock
 
@@ -130,10 +56,10 @@ Record: scope type, file list, initial file count.
 ```bash
 jj diff --from dev@origin --stat
 BASELINE_OP=$(jj op log --limit 1 --no-graph -T 'id.short()')
-echo "$BASELINE_OP" > .jj-optimize-baseline-op
+echo "$BASELINE_OP" > "$(jj root)/.jj/optimize-baseline-op"
 ```
 
-Snapshot created via the jj operation log. If optimize goes wrong at any point: `jj op restore "$(cat .jj-optimize-baseline-op)" && rm .jj-optimize-baseline-op` — this rewinds the entire repo state (all changes made since the snapshot are undone atomically).
+Snapshot created via the jj operation log. The sentinel lives under `.jj/` — jj's metadata directory is excluded from the working copy, so it is never snapshotted into a commit. If optimize goes wrong at any point: `jj op restore "$(cat "$(jj root)/.jj/optimize-baseline-op")" && rm "$(jj root)/.jj/optimize-baseline-op"` — this rewinds the entire repo state (all changes made since the snapshot are undone atomically).
 
 Verify the project's typecheck, lint, and test commands pass before starting — don't optimize broken code. If they fail → stop. Fix first, then re-run `/optimize`.
 
@@ -178,36 +104,23 @@ Initialize: `challenge_ledger = []` (persists across discovery cycles within thi
 
 #### Step 1: Analyze
 
-Launch **4 subagents in one message** (one per dimension — Safety, Quality, Structure, Performance) — each reports BOTH findings (problems) AND proposals (opportunities):
+Launch **4 subagents in one message** (one per dimension — Safety, Quality, Structure, Performance). Each reports BOTH findings (problems) AND proposals (opportunities).
 
-```
-[DIMENSION] analysis.
+For each dimension, dispatch:
 
-Adopt this dimension's lens and analyze the scope. Stay within the lens — items in the "out of scope" list belong to other agents and must not be reported here. Rules are not a discovery source; they constrain how fixes are written, not what to find.
-
-Dimension lens:
-[Paste only the relevant dimension's lens question, "what this lens reveals" list, and "out of scope" list from the Dimensions section above]
-
-Scope: [type] | Context: [description]
-Files: [list]
-[If iteration 2+: "Ledger so far: [ledger entries for files in scope]"]
-[If iteration 2+: "Skipped (do not re-report): [skipped set]"]
-[If iteration 2+: "Failed (do not re-propose): [failed set]"]
-[If re-analysis triggered by challenge: "Challenge context: [critique that triggered re-analysis, with evidence and new files added to scope]"]
-
-Report TWO sections:
-
-## Findings (problems to fix)
-Issues, violations, bugs — things that are wrong and should be corrected.
-[Per finding: severity (CRITICAL/HIGH/MEDIUM), title, @location, narrative]
-
-## Proposals (opportunities to evolve)
-Ways to make good code better — simpler, faster, safer, more accessible.
-Only propose changes you are confident improve the code. No speculative "might help" proposals.
-[Per proposal: title, @location, hypothesis, concrete change, expected impact]
-
-Max 2 Explore subagents.
-```
+> Read `src/planwise/workflows/_optimize/analyze.md` § **Dimension analysis**, § **Dimensions**.
+> Inputs:
+> - Dimension: `<Safety | Quality | Structure | Performance>`
+> - Scope type: `<type>`
+> - Context: `<description>`
+> - Files: `<list>`
+> - Ledger (iteration 2+): `<entries for files in scope, or "None">`
+> - Skipped — do not re-report (iteration 2+): `<set, or "None">`
+> - Failed — do not re-propose (iteration 2+): `<set, or "None">`
+> - Challenge context (if re-analysis triggered): `<critique + evidence + new files, or "None">`
+> - Rules: `<paste $RULES>`
+>
+> Return per § **Return contract**.
 
 #### Step 2: Triage
 
@@ -222,47 +135,16 @@ Max 2 Explore subagents.
 
 #### Step 3: Challenge
 
-Launch a **challenger agent**:
+Dispatch a challenger agent:
 
-```
-Challenge this optimization plan. Your job is to find flaws, gaps, and missed opportunities that would make execution suboptimal. Be adversarial — assume the plan is wrong until proven otherwise.
-
-## Current plan
-[Full ordered plan: fixes first, then proposals, with file:region, severity, rationale for each]
-
-## Raw analysis
-[All findings + proposals from the 4 dimension agents, including ones triage dropped]
-
-## Ledger context
-[Ledger entries from previous iterations, skipped set, failed set]
-
-## Challenge ledger
-[Previous challenges + resolutions in this discovery cycle — do NOT re-raise resolved items]
-
-Examine these angles:
-
-1. **Root cause collapse** — are multiple findings symptoms of one cause? Identify the root and propose replacing N patches with 1 fix. Cite the specific findings by ID.
-2. **Cascade prediction** — will fix A change code that fix B targets? Identify the dependency and propose reordering or merging.
-3. **Redundancy elimination** — will any proposal become unnecessary after a specific fix lands? Cite which ones.
-4. **Hidden connections** — do findings in different files share a common dependency (import, trait, type) that should also be in scope? Name the missing file(s). If found → flag as RE-ANALYZE.
-5. **Assumption verification** — pick the 2-3 highest-impact plan items. Read the actual code at the cited locations. Does the finding/proposal actually hold? Flag any that don't survive code review.
-6. **Simpler alternatives** — can multiple changes be achieved by 1 change at a different abstraction level? (e.g., fixing a shared utility instead of 3 call sites). If the alternative targets a file not yet analyzed → flag as RE-ANALYZE.
-7. **Missed drops** — did triage keep anything that should be in `skipped`? (too risky, too vague, no concrete direction)
-
-For each critique, report:
-
-### Critique: [title]
-**Type:** [root-cause-collapse | cascade | redundancy | hidden-connection | assumption-fail | simpler-alternative | missed-drop]
-**Affects:** [plan item IDs]
-**Evidence:** [what you read/verified]
-**Proposed revision:** [concrete change to the plan]
-**Re-analyze:** [YES — list new files to add to scope | NO]
-
-If you find zero valid critiques after examining all 7 angles:
-APPROVED — [one-line reasoning why the plan is sound]
-
-Max 3 Explore subagents for assumption verification.
-```
+> Read `src/planwise/workflows/_optimize/challenge.md` § **Challenger**.
+> Inputs:
+> - Current plan: `<full ordered plan — fixes first, then proposals, with file:region, severity, rationale>`
+> - Raw analysis: `<all findings + proposals from the 4 dimension agents, including ones triage dropped>`
+> - Ledger context: `<ledger entries from previous iterations, skipped set, failed set>`
+> - Challenge ledger: `<previous critiques + resolutions in this discovery cycle, or "None">`
+>
+> Return per § **Return contract**.
 
 #### Step 4: Process challenger response
 
@@ -288,35 +170,16 @@ Max 3 Explore subagents for assumption verification.
 
 ### Phase 4: Execute fixes
 
-Dispatch fix agents sequentially — one per file (max 5 findings each).
+Dispatch fix agents sequentially — one per file (max 5 findings each):
 
-```
-Fix these findings in [path(s)].
-
-[Per finding: #, title, severity, @location, narrative]
-[Relevant ledger entries for this file: [entries]]
-
-Rules:
-- Do NOT modify test files and test fixtures — tests are the locked evaluator.
-- Optimize for best code, not smallest diff. The result should read like it was written correctly from the start — not patched.
-- Prefer deletions over additions. Added complexity must justify itself.
-- No drive-by refactors.
-
-Steps:
-1. State hypothesis: what you expect and why.
-2. Read target file + context (imports, callers, related files in the same module).
-3. Follow the rules from the Rules section.
-4. Fix. If multiple approaches work, pick the one that produces the cleanest result.
-5. Self-verify: re-read your diff against the specific finding. For each finding you addressed:
-   - Does the diff eliminate the exact issue described at @location? (re-read the changed code — is the problem gone?)
-   - Does the fix follow the rules, or did you invent a different approach?
-   - Did you change ONLY what's needed, or did scope creep in?
-   If any answer is no, revise before reporting.
-6. Report concisely — this flows back to the main agent's context:
-   FIXED: [one-line hypothesis] | Files: [list] | Lines changed: [N]
-   SKIPPED: [one-line reason] | Finding: #N
-   PARTIAL: [one-line what remains] | Files: [list]
-```
+> Read `src/planwise/workflows/_optimize/execute.md` § **Fix**.
+> Inputs:
+> - Target file(s): `<path(s)>`
+> - Findings: `<per finding — #, title, severity, @location, narrative>`
+> - Relevant ledger entries for this file: `<entries, or "None">`
+> - Rules: `<paste $RULES>`
+>
+> Return per § **Return contract (fix)**.
 
 After each fix agent returns, **commit immediately** — jj's auto-snapshot has already captured the edits, and a committed change is cheaper and safer to reverse than uncommitted working-copy edits. Commit order is: capture restore-point → commit → run checks → restore on failure.
 
@@ -350,25 +213,15 @@ SKIPPED findings → add to `skipped`.
 For each proposal from the triage plan (one at a time, sequentially):
 
 1. Dispatch an evolution agent (the challenge phase already ordered fixes before proposals — the agent reads the post-fix code and self-corrects if the proposal no longer applies):
-```
-Apply this improvement to [path(s)].
 
-Proposal: [title, hypothesis, change description]
-[Relevant ledger entries for this file: [entries]]
-
-Rules:
-- Do NOT modify test files and test fixtures — tests are the locked evaluator.
-- The change must be a clear improvement — simpler, faster, safer, or more accessible.
-- If after reading the code you realize the proposal won't improve things, report SKIP.
-
-Steps:
-1. Read target file + context.
-2. Follow the rules from the Rules section above.
-3. Apply the change.
-4. Report concisely — this flows back to the main agent's context:
-   APPLIED: [one-line what changed] | Files: [list]
-   SKIP: [one-line why proposal doesn't hold up]
-```
+   > Read `src/planwise/workflows/_optimize/execute.md` § **Evolve**.
+   > Inputs:
+   > - Target file(s): `<path(s)>`
+   > - Proposal: `<title, hypothesis, change description>`
+   > - Relevant ledger entries for this file: `<entries, or "None">`
+   > - Rules: `<paste $RULES>`
+   >
+   > Return per § **Return contract (evolve)**.
 
 2. If SKIP → record in ledger, move to next proposal.
 
@@ -447,7 +300,7 @@ CONVERGED (no remaining) | STUCK (skipped/manual-only remain) | STOPPED (user ha
 typecheck: P/F | lint: P/F | test: P/F
 
 ## Rollback
-To undo all optimize changes: `jj op restore "$(cat .jj-optimize-baseline-op)" && rm .jj-optimize-baseline-op`
+To undo all optimize changes: `jj op restore "$(cat "$(jj root)/.jj/optimize-baseline-op")" && rm "$(jj root)/.jj/optimize-baseline-op"`
 
 Next:  /next
 Tip: /clear or /compact first if context is heavy.

@@ -8,6 +8,8 @@ Write tests that try to BREAK the code. Every test has a hypothesis: "I believe 
 
 But you can't break what you haven't defined. **Stage 1** locks down the behavioral contract — what the code promises through its public API, its error handling, and its state transitions. **Stage 2** tries to violate that contract through adversarial probing across boundaries, race conditions, resource limits, auth bypass, state corruption, and malformed input. The functional tests are the measuring stick; the adversarial tests are the hammer.
 
+**Assumed context:** this workflow runs inside a fresh jj workspace created by `pw claude`. Concurrent runs are isolated by workspace — each `pw claude` session has its own `@`. No cross-session contention.
+
 ## Deliverable
 
 The output of this workflow is **new test files committed to the test bookmark**. Running existing tests and reporting their results is not the goal — writing new tests is. If the workflow ends without new test commits, it has failed.
@@ -20,7 +22,17 @@ Agents MUST NOT modify non-test files (anything outside test directories and tes
 
 ## Stale-trunk check
 
-If the current change is based on `dev@origin` and the remote has advanced, rebase first: `jj rebase -d dev@origin`. jj records any conflicts as data and they are resolved inline.
+If the current change is based on `dev@origin` and the remote has advanced, rebase first: `jj rebase -d dev@origin`. Rebase never blocks — jj records conflicts as data.
+
+```bash
+jj resolve --list
+```
+
+For each conflicted path: Read the file, `jj show` the trunk change that introduced the conflicting side to recover intent, then classify:
+- Safe auto-merge region — pick the unified edit that satisfies both sides.
+- Real logic collision — edit the file to a coherent unified result, preserving both intents where possible.
+
+`jj status` must report no remaining conflicts before continuing.
 
 ## Phase 1: Resolve scope
 
@@ -44,10 +56,10 @@ Record: scope type, file list, target description.
 
 ### Bookmark strategy
 
-Tests commit to a bookmark, never directly to `dev`. Check if a test bookmark exists:
+Tests commit to a bookmark, never directly to `dev`. Check if this target's test bookmark already exists (locally or on the remote):
 
 ```bash
-jj bookmark list --all-remotes | grep '^test/'
+jj bookmark list --all-remotes | grep "^test/<target-slug>\(@\|$\)"
 ```
 
 - **Bookmark exists:** switch to it.
@@ -78,25 +90,14 @@ Read all files in scope. For each file, catalog:
 
 ### Step 2: Explore test infrastructure
 
-Launch an **Explore subagent** to map the project's test infrastructure relevant to the target:
+Dispatch an **Explore subagent** to map the project's test infrastructure relevant to the target.
 
-```
-Explore the test infrastructure for [target description].
-
-Find and read:
-- Shared test helpers, fixtures, factories, builders
-- Request/response utilities and test clients
-- Conftest files, setup/teardown patterns
-- Existing tests for the target files (or similar modules)
-- Available test dependencies (property-based testing libs, faker, etc.)
-
-Report:
-- Reusable helpers with their signatures and import paths
-- Assertion patterns and conventions used in existing tests
-- What test types are supported (unit, integration, async, concurrency)
-- Available fixture/factory patterns with code snippets
-- Test infrastructure gaps — what CAN'T be tested with current tooling
-```
+> Read `src/planwise/workflows/_test/explore.md` § **Test infrastructure exploration**.
+> Inputs:
+> - Target description: `<target description>`
+> - File list in scope: `<paste>`
+>
+> Return per § **Return contract**.
 
 The explore output feeds directly into the dimension agents (Phase 3) — they need to know what's testable before proposing attack vectors.
 
@@ -123,40 +124,17 @@ $TESTRULES
 
 ### Stage 1: Functional coverage
 
-Before trying to break the code, define what "working" looks like. Launch a **functional analysis subagent**:
+Before trying to break the code, define what "working" looks like. Dispatch a **functional analysis subagent**:
 
-```
-Functional coverage analysis.
-
-Target: [file list]
-Scope: [description]
-Recon catalog: [Phase 2 Step 1 output — API surface, expected behaviors, error contracts, state transitions, existing test coverage]
-Test infrastructure: [explore output from Phase 2 Step 2]
-[If from issue slug: "Requirements and Acceptance Criteria: [from the issue]"]
-
-Analyze the target's public API and identify test cases that verify the behavioral contract. You are defining what "working correctly" means — the adversarial stage will then try to violate it.
-
-IMPORTANT: Do NOT modify any non-test files. You are analyzing, not fixing.
-
-For each test case, report:
-
-### Test: [title]
-**Behavior:** [what the code promises — expected input → expected output/effect]
-**Type:** happy-path | error-contract | state-transition | integration-contract
-**Target:** @file:line
-**Test sketch:** [2-3 line pseudocode]
-**Needs:** [existing helper, new fixture, etc.]
-
-Categories to cover:
-- **Happy paths:** primary use cases with valid inputs → expected outputs
-- **Error contracts:** documented/expected error behavior for known invalid inputs (not adversarial — these are errors the code explicitly handles)
-- **State transitions:** valid state changes produce correct results, invariants hold
-- **Integration contracts:** components interact correctly at boundaries (caller → callee, request → response shape)
-- **Boundary values:** valid edges — min/max of accepted ranges, empty-but-valid inputs
-
-Do not invent failure scenarios — that's Stage 2. Focus on what the code is SUPPOSED to do.
-Report at most 10 test cases. Prioritize untested public API surface.
-```
+> Read `src/planwise/workflows/_test/analyze.md` § **Functional coverage analysis**.
+> Inputs:
+> - Target file list: `<paste>`
+> - Scope: `<description>`
+> - Recon catalog: `<Phase 2 Step 1 output — API surface, expected behaviors, error contracts, state transitions, existing test coverage>`
+> - Test infrastructure: `<explore output from Phase 2 Step 2>`
+> - Requirements and Acceptance Criteria (if from issue slug): `<paste or "N/A">`
+>
+> Return per § **Return contract (functional)**.
 
 ### Stage 2: Adversarial analysis
 
@@ -172,54 +150,21 @@ Not every target warrants all 6 dimensions. Before launching agents, filter base
 | No persistent state, no state machines | Dimension 5: State corruption & invariants |
 | No external dependencies (DB, HTTP clients, queues) | Dimension 6: Error handling & dependency resilience (dependency half) |
 
-Dimension 1 (Input abuse) always runs — every function has inputs. For small targets, use judgment to keep the dimension count proportional to the attack surface.
+Dimension 1 (Input abuse) always runs — every function has inputs. For small targets, use judgment to keep the dimension count proportional to the attack surface. Dimension descriptions live in `_test/analyze.md` § **Dimensions**.
 
-Launch **one subagent per selected dimension in one message** — each examines the target through its adversarial lens:
+Dispatch **one subagent per selected dimension in a single message** — each examines the target through its adversarial lens:
 
-```
-[DIMENSION] adversarial analysis.
-
-Target: [file list]
-Scope: [description]
-Recon catalog: [Phase 2 Step 1 output — API surface, input types, validation gaps, error paths, async boundaries, external dependencies, existing test coverage per file]
-Functional contract: [Stage 1 output — the behavioral contract these tests will try to violate]
-Test infrastructure: [explore output from Phase 2 Step 2 — available helpers, fixtures, supported test types, infrastructure gaps]
-Research findings: [relevant techniques from Phase 2 Step 3, or "Skipped — standard domain" if Step 3 was not run]
-
-You are trying to BREAK this code. The functional contract above defines what "working" looks like — find inputs, states, and conditions that violate it. Use the recon catalog as your starting point — do not re-read target files unless you need to examine a specific code path in detail.
-
-IMPORTANT: Do NOT modify any non-test files. You are analyzing, not fixing.
-
-For each attack vector you identify, report:
-
-### Attack: [title]
-**Hypothesis:** "I believe [specific input/condition] will cause [specific failure] because [reasoning]"
-**Vector:** [dimension]
-**Severity:** CRITICAL / HIGH / MEDIUM
-**Target:** @file:line
-**Test sketch:** [2-3 line pseudocode showing the test approach]
-**Needs:** [what test infrastructure is required — existing helper, new fixture, docker, etc.]
-
-Report at most 5 attack vectors per dimension. Prioritize by likelihood of finding a real bug.
-```
-
-### Dimension 1: Input abuse
-Malformed, oversized, empty, null-equivalent, unicode edge cases, type confusion, injection payloads (SQL, OS command, header, path traversal, SSTI/template injection), XSS via stored/reflected input, SSRF through user-controlled URLs, CSRF token bypass, denormalized strings (whitespace-only, zero-width chars, RTL overrides), boundary values (0, -1, max integer, empty string vs null/None).
-
-### Dimension 2: Auth & access control
-Token manipulation (expired, future-dated, wrong algorithm, missing claims, extra claims, malformed base64), BOLA/IDOR (accessing resources by manipulating object IDs), BFLA (calling admin/privileged endpoints as regular user), missing authentication on critical functions, privilege escalation (horizontal and vertical), session state attacks (revoked but cached, race between revocation and use), MFA bypass attempts, cookie injection/smuggling.
-
-### Dimension 3: Concurrency & race conditions
-TOCTOU between check and use, concurrent mutations to shared state, lock contention under parallel requests, task cancellation mid-operation, cancel-safety violations in async runtimes, channel/queue backpressure, concurrent idempotency key usage, double-spend/duplicate processing from concurrent submissions.
-
-### Dimension 4: Resource exhaustion & limits
-Oversized request bodies, header flooding, connection exhaustion, memory pressure from unbounded collections, slow-loris style attacks, rate limit bypass attempts, idempotency store growth without cleanup, ReDoS (catastrophic regex backtracking), decompression bombs (zip/gzip), XXE expansion (billion laughs).
-
-### Dimension 5: State corruption & invariants
-Invalid state transitions, partial updates that violate invariants, orphaned records, stale cache entries, insecure deserialization (pickle.loads, yaml.load, jsonpickle — code execution via crafted payloads), deserialization into inconsistent state, strict-mode deserialization bypass, mass assignment (unexpected fields overwriting protected attributes), timestamp manipulation, timezone handling errors.
-
-### Dimension 6: Error handling & dependency resilience
-Error message information leakage (stack traces, internal paths, SQL errors, PII/tokens/secrets in logs or responses), error type confusion (wrong status code for error class), unhandled runtime failures (unguarded exceptions, unchecked error returns), silent error swallowing (discarded results, ignored return values). Upstream failure modes: external service timeouts, 5xx responses, partial/malformed responses, retry storms, circuit breaker behavior, outbox consistency under failure, cascading failures from dependency errors, unsafe consumption of upstream APIs (trusting response content without validation).
+> Read `src/planwise/workflows/_test/analyze.md` § **Adversarial dimension analysis**, § **Dimensions**.
+> Inputs:
+> - Dimension: `<Dimension N: name>` (focus exclusively on this one)
+> - Target file list: `<paste>`
+> - Scope: `<description>`
+> - Recon catalog: `<Phase 2 Step 1 output — API surface, input types, validation gaps, error paths, async boundaries, external dependencies, existing test coverage>`
+> - Functional contract: `<Stage 1 output — the behavioral contract these tests will try to violate>`
+> - Test infrastructure: `<explore output from Phase 2 Step 2>`
+> - Research findings: `<relevant techniques from Phase 2 Step 3, or "Skipped — standard domain">`
+>
+> Return per § **Return contract (adversarial)**.
 
 ## Phase 4: Triage
 
@@ -271,56 +216,32 @@ Use `AskUserQuestion` tool: **"N functional test cases + N adversarial vectors. 
 
 Functional tests first (they establish the baseline), then adversarial. Dispatch test-writing agents sequentially — one per target file (unit tests) or per test file (integration tests).
 
-### Stage 1 agent prompt template (functional)
+### Stage 1 dispatch (functional)
 
-```
-Write functional tests for [target file(s)].
+> Read `src/planwise/workflows/_test/write.md` § **Functional tests**.
+> Inputs:
+> - Target file(s): `<paste>`
+> - Bookmark: `<current bookmark>` (jj change id: `<current change id>`)
+> - Test infrastructure: `<full explore output from Phase 2 Step 2>`
+> - Test cases (ordered by type): `<for each case: id, title, behavior, type, target, test sketch>`
+> - Rules: `<paste $TESTRULES>`
+>
+> Return per § **Return contract (functional)**.
 
-Context:
-- Bookmark: [current bookmark] (jj change id: [current change id])
-- Test infrastructure: [full explore output from Phase 2 Step 2 — reusable helpers with signatures and import paths, assertion patterns, fixture/factory snippets, supported test types]
-- Follow the project's existing test patterns for setup, assertions, and async handling
-
-Test cases (ordered by type):
-[For each case: id, title, behavior, type, target, test sketch]
-
-Follow the rules from the Rules section above (Contract: docstrings, naming, helper reuse, production code lock, etc.).
-
-Report:
-  WRITTEN: [test count] tests in [file]
-  SKIPPED: [count] (not feasible without infrastructure changes)
-  BLOCKED: [describe what prevents writing the test]
-```
-
-### Stage 2 agent prompt template (adversarial)
+### Stage 2 dispatch (adversarial)
 
 Max 8 attack vectors per agent.
 
-```
-Write adversarial tests for [target file(s)].
-
-Context:
-- Bookmark: [current bookmark] (jj change id: [current change id])
-- Test infrastructure: [full explore output from Phase 2 Step 2 — reusable helpers with signatures and import paths, assertion patterns, fixture/factory snippets, supported test types]
-- Functional tests already written: [summary of Stage 1 tests — what contracts are locked down]
-- Follow the project's existing test patterns for setup, assertions, and async handling
-
-Attack vectors to test (ordered by severity):
-[For each vector: id, title, hypothesis, target, test sketch]
-
-Follow the rules from the Rules section above (Hypothesis: docstrings, naming, helper reuse, production code lock, deterministic concurrency tests, etc.). Language rules govern your test scaffolding — adversarial payloads fed into production code under test are unconstrained by them.
-
-After writing each test:
-1. State what you expect: PASS (code handles it correctly) or FAIL (test exposes a bug).
-2. If you expect FAIL, explain the bug the test would expose.
-
-Report:
-  WRITTEN: [test count] tests in [file]
-  EXPECTED_PASS: [count] (code is robust)
-  EXPECTED_FAIL: [count] (potential bugs found)
-  SKIPPED: [count] (not feasible without infrastructure changes)
-  BLOCKED: [describe what prevents writing the test — missing fixture, unclear behavior, production code needs changes]
-```
+> Read `src/planwise/workflows/_test/write.md` § **Adversarial tests**.
+> Inputs:
+> - Target file(s): `<paste>`
+> - Bookmark: `<current bookmark>` (jj change id: `<current change id>`)
+> - Test infrastructure: `<full explore output from Phase 2 Step 2>`
+> - Functional tests already written: `<summary of Stage 1 tests — what contracts are locked down>`
+> - Attack vectors (ordered by severity): `<for each vector: id, title, hypothesis, target, test sketch>`
+> - Rules: `<paste $TESTRULES>`
+>
+> Return per § **Return contract (adversarial)**.
 
 **Handle agent status (both stages):**
 - **BLOCKED:** Review the blocker. If it requires production code changes or new test infrastructure, record the items as DEFERRED with the reason. Do not stall the workflow.
@@ -347,6 +268,17 @@ After each agent returns:
    jj commit <test_files_only> -m "test: [functional|adversarial] tests for [target] — [summary]"
    ```
    Pass explicit test paths to `jj commit` so non-test files remain in the working copy and are excluded from this commit. If non-test edits crept into the working copy, `jj restore <non-test-paths>` them first.
+
+### Anchor the bookmark
+
+After all test commits land, advance `test/<target-slug>` to the stack tip so the epilogue's `jj git push` publishes every test commit, not just the first. The revset picks the highest non-empty change in `dev@origin..@`:
+
+```bash
+TEST_HEAD=$(jj log -r 'heads(dev@origin..@ ~ empty())' --no-graph -T 'change_id.short()' --limit 1)
+jj bookmark set test/<target-slug> -r "$TEST_HEAD"
+```
+
+`jj bookmark set` rejects non-fast-forward moves without `--allow-backwards`. If rejected, investigate — do not force.
 
 ## Phase 6: Verify
 
