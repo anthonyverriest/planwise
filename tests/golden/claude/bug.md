@@ -9,12 +9,12 @@ You DO write the failing test that captures the bug. You do NOT write the fix �
 
 ## What the user reported
 
-{{ arguments() }}
+<ARGS>
 
 ## Phase 0: Resolve input
 
 - **Parented bug** — first whitespace-delimited token resolves to an existing issue slug (`planwise view <token>` succeeds). Remainder is the bug description. The resolved issue is the parent (feature, sub-feature, or task — all valid).
-- **Standalone bug** — first token is not a known slug. Whole `{{ arguments() }}` is the description. No parent.
+- **Standalone bug** — first token is not a known slug. Whole `<ARGS>` is the description. No parent.
 - **Ambiguous** — slug-shaped but not found. Ask the user: typo, or free text starting with a slug-like word?
 
 ```bash
@@ -228,7 +228,9 @@ Then challenge your own output: false positives? Over-scoped? Simplest change th
 
 If unknowns remain, investigate before proceeding. Don't commit to a plan that depends on unverified assumptions.
 
-{{ ask(prompt="Bug spec ready. Create the issue, or stop here?", choices=[["No", "stop. Body and failing test stay in conversation."], ["Yes", "Phase 4."]]) }}
+Use `AskUserQuestion` tool: **"Bug spec ready. Create the issue, or stop here?"**
+- If No -> stop. Body and failing test stay in conversation.
+- If Yes -> Phase 4.
 
 ### Pre-creation checklist
 

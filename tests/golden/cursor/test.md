@@ -18,7 +18,7 @@ The output of this workflow is **new test files committed to the test bookmark**
 
 Agents MUST NOT modify non-test files (anything outside test directories and test modules). If the code under test has a real bug, document it — do not fix it. Repeat this rule in every agent prompt.
 
-## Target: {{ arguments() }}
+## Target: <the user's task>
 
 ## Stale-trunk check
 
@@ -38,15 +38,15 @@ For each conflicted path: Read the file, `jj show` the trunk change that introdu
 
 **Base is `dev@origin`** All diffs and scope resolution use the `dev` bookmark on the remote.
 
-- **Issue slug** — `{{ arguments() }}` matches an existing issue slug.
+- **Issue slug** — `<the user's task>` matches an existing issue slug.
   ```bash
   planwise view <slug>
   ```
   Read the issue. Extract file paths from its Implementation Notes — these are the scope.
 
-- **Free text** — anything else. Resolve to files by searching the codebase (grep, glob, project structure). Ask the user if ambiguous: "I found N files matching '{{ arguments() }}'. Which should I target?"
+- **Free text** — anything else. Resolve to files by searching the codebase (grep, glob, project structure). Ask the user if ambiguous: "I found N files matching '<the user's task>'. Which should I target?"
 
-- **None** — no `{{ arguments() }}` provided. Default to changed files:
+- **None** — no `<the user's task>` provided. Default to changed files:
   ```bash
   jj diff --from dev@origin --name-only
   ```
@@ -118,7 +118,7 @@ Extract concrete, actionable techniques. Discard generic advice. Record findings
 
 ## Rules
 
-$TESTRULES
+
 
 ## Phase 3: Test analysis
 
@@ -206,7 +206,7 @@ Top 5 adversarial vectors:
   2. ...
 ```
 
-{{ ask(prompt="N functional test cases + N adversarial vectors. Proceed with test writing, adjust, or stop here (report only)?") }}
+Use `AskQuestion` if available (fallback: ask in chat): **"N functional test cases + N adversarial vectors. Proceed with test writing, adjust, or stop here (report only)?"**
 
 - **Proceed:** continue to Phase 5.
 - **Adjust:** apply the user's changes to the vector list, then re-present.
@@ -224,7 +224,7 @@ Functional tests first (they establish the baseline), then adversarial. Dispatch
 > - Bookmark: `<current bookmark>` (jj change id: `<current change id>`)
 > - Test infrastructure: `<full explore output from Phase 2 Step 2>`
 > - Test cases (ordered by type): `<for each case: id, title, behavior, type, target, test sketch>`
-> - Rules: `<paste $TESTRULES>`
+> - Rules: `<paste >`
 >
 > Return per § **Return contract (functional)**.
 
@@ -239,7 +239,7 @@ Max 8 attack vectors per agent.
 > - Test infrastructure: `<full explore output from Phase 2 Step 2>`
 > - Functional tests already written: `<summary of Stage 1 tests — what contracts are locked down>`
 > - Attack vectors (ordered by severity): `<for each vector: id, title, hypothesis, target, test sketch>`
-> - Rules: `<paste $TESTRULES>`
+> - Rules: `<paste >`
 >
 > Return per § **Return contract (adversarial)**.
 

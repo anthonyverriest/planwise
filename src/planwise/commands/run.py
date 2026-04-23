@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import click
 
+from planwise.agents import VALID_AGENTS
 from planwise.helpers import echo_json, is_text
 from planwise.rulesets import parse_rules_callback
 from planwise.store import get_store
@@ -105,6 +106,13 @@ def register(cli: click.Group) -> None:
     expose_value=True,
     help="Override project rulesets for this run (comma-separated or repeatable).",
 )
+@click.option(
+    "--agent",
+    type=click.Choice(VALID_AGENTS),
+    default="claude",
+    show_default=True,
+    help="Render workflow directives for the target agent.",
+)
 @click.pass_context
 def run(
     ctx: click.Context,
@@ -112,6 +120,7 @@ def run(
     args: tuple[str, ...],
     list_flag: bool,
     rules: tuple[str, ...],
+    agent: str,
 ) -> None:
     """Output a workflow's markdown content.
 
@@ -135,7 +144,7 @@ def run(
     arguments = " ".join(arg.removesuffix(".md") for arg in args)
     rule_names = list(rules) if rules else list(get_store(ctx).get_config("rules", []))
 
-    content = expand_workflow(workflow, arguments, rule_names)
+    content = expand_workflow(workflow, arguments, rule_names, agent=agent)
     if content is None:
         available = ", ".join(list_workflows())
         raise click.UsageError(

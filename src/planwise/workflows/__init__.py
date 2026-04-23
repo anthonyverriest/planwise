@@ -72,22 +72,27 @@ def expand_workflow(
     name: str,
     arguments: str = "",
     rule_names: list[str] | None = None,
+    agent: str = "claude",
 ) -> str | None:
-    """Load a workflow and substitute $ARGUMENTS and $RULES/$TESTRULES markers.
+    """Load a workflow, expand directives for `agent`, substitute markers.
 
     Args:
         name: Workflow name without the .md extension.
         arguments: Value to substitute for $ARGUMENTS markers.
-        rule_names: Project ruleset names to append after the base ruleset when
-            expanding $RULES / $TESTRULES markers. An empty list or None produces
-            an empty replacement (markers are removed).
+        rule_names: Project ruleset names appended after the base ruleset when
+            expanding $RULES / $TESTRULES. Empty/None removes the markers.
+        agent: Target agent for directive rendering. Defaults to "claude".
 
     Returns:
         The expanded workflow text, or None if the workflow does not exist.
     """
+    from planwise.agents import get_agent
+
     content = read_workflow(name)
     if content is None:
         return None
+    renderer = get_agent(agent)
+    content = renderer.render_workflow(name, content)
     content = content.replace(ARGUMENTS_MARKER, arguments)
     content = _replace_rules(content, list(rule_names) if rule_names else [])
     return content

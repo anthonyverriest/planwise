@@ -8,26 +8,26 @@ Implement a task issue following its spec, then test, optimize, and update the k
 
 **Assumed context:** this workflow runs inside a fresh jj workspace created by `pw claude`. Concurrent `/task` runs are isolated by workspace — each `pw claude` session has its own `@`. No cross-session contention.
 
-## Target: {{ arguments() }}
+## Target: <ARGS>
 
 ## Step 1: Read the task
 
 ```bash
-planwise view {{ arguments() }}
+planwise view <ARGS>
 ```
 
 **Lock check** — if this task is already `in-progress`, stop:
 ```bash
-planwise view {{ arguments() }} --field status
+planwise view <ARGS> --field status
 ```
-If status is `in-progress`, STOP: `Task {{ arguments() }} is already being implemented. Coordinate before proceeding.`
+If status is `in-progress`, STOP: `Task <ARGS> is already being implemented. Coordinate before proceeding.`
 
 Read the full spec: What & Why, Requirements, Edge Cases, Constraints, Scope, Implementation Notes, Acceptance Criteria.
 
 Move to in-progress:
 
 ```bash
-planwise status {{ arguments() }} in-progress
+planwise status <ARGS> in-progress
 ```
 
 ## Step 1.5: Describe the task change
@@ -35,7 +35,7 @@ planwise status {{ arguments() }} in-progress
 The workspace is already a fresh change off `dev@origin` (created by `pw claude`). Describe it so history and later history-mining workflows can find it by slug:
 
 ```bash
-jj describe -m "<type>: <short description> (#{{ arguments() }})"
+jj describe -m "<type>: <short description> (#<ARGS>)"
 ```
 
 Commit types: feat, fix, ref, test, docs, chore, style. Use imperative mood.
@@ -61,7 +61,7 @@ Task never writes to `_lessons.md` — production is reserved for `/memo` at the
 
 ## Rules
 
-$RULES
+
 
 ## Step 2: Implement
 
@@ -84,7 +84,7 @@ For bug fixes:
 
 ## Test Rules
 
-$TESTRULES
+
 
 ## Step 3: Test
 
@@ -142,12 +142,12 @@ Step 1.5 already set the implementation description. Close it with a bare `jj co
 jj commit <non-test-paths>
 ```
 
-If scope shifted during implementation and the Step 1.5 description no longer fits, `jj describe -m "<type>: <new description> (#{{ arguments() }})"` before this commit.
+If scope shifted during implementation and the Step 1.5 description no longer fits, `jj describe -m "<type>: <new description> (#<ARGS>)"` before this commit.
 
 Then commit the tests:
 
 ```bash
-jj commit -m "test: <what was tested> (#{{ arguments() }})"
+jj commit -m "test: <what was tested> (#<ARGS>)"
 ```
 
 Commit types: feat, fix, ref, test, docs, chore, style. Use imperative mood, focus on outcomes.
@@ -200,7 +200,7 @@ If any answer is no, revise before proceeding.
 
 Re-run checks. If checks pass, commit separately — pass explicit paths so unrelated working-copy edits stay out of this commit:
 ```bash
-jj commit <modified-files> -m "optimize: <what was improved> (#{{ arguments() }})"
+jj commit <modified-files> -m "optimize: <what was improved> (#<ARGS>)"
 ```
 
 If checks fail, the optimize edits are still uncommitted in the working copy — discard them with `jj restore <files>` and move on. Do not loop.
@@ -252,7 +252,7 @@ If no updates needed, skip.
 If knowledge files were updated, commit them separately so the PR keeps one intent per commit:
 
 ```bash
-jj commit planwise/knowledge/ -m "docs: update knowledge for <domain> (#{{ arguments() }})"
+jj commit planwise/knowledge/ -m "docs: update knowledge for <domain> (#<ARGS>)"
 ```
 
 ## Step 7: Anchor bookmark, close, and report
@@ -270,11 +270,11 @@ jj bookmark create task/<topic> -r "$TASK_HEAD" || jj bookmark set task/<topic> 
 Mark the task done:
 
 ```bash
-planwise status {{ arguments() }} done
+planwise status <ARGS> done
 ```
 
 ```
-Task {{ arguments() }} complete.
+Task <ARGS> complete.
 
 What was done:
 - [Summary of changes]
@@ -290,5 +290,5 @@ Retrospective: [one sentence — what assumption was wrong or what you'd do diff
 Bookmark: task/<topic> (head: $TASK_HEAD)
 
 Next steps (bookmark is published by the epilogue):
-1. Open the PR: gh pr create --base dev --head task/<topic> --title "<title>" --body "Closes #{{ arguments() }}"
+1. Open the PR: gh pr create --base dev --head task/<topic> --title "<title>" --body "Closes #<ARGS>"
 ```

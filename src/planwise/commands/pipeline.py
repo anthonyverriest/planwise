@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import click
 
+from planwise.agents import VALID_AGENTS
 from planwise.pipeline import PHASE_CHAIN, SLUG_CONSUMING_PHASES
 from planwise.pipeline.slug import find_latest_creation_candidate
 from planwise.pipeline.state import (
@@ -58,8 +59,15 @@ def pipeline_enter(ctx: click.Context, phase: str, args: tuple[str, ...]) -> Non
 
 @click.command("pipeline-next", hidden=True)
 @click.argument("chosen_slug", required=False)
+@click.option(
+    "--agent",
+    type=click.Choice(VALID_AGENTS),
+    default="claude",
+    show_default=True,
+    help="Render the next phase's workflow for the target agent.",
+)
 @click.pass_context
-def pipeline_next(ctx: click.Context, chosen_slug: str | None) -> None:
+def pipeline_next(ctx: click.Context, chosen_slug: str | None, agent: str) -> None:
     """Output the next phase's expanded workflow, advancing per-slug state.
 
     Invoked by the `/next` skill. Run `/clear` first for a fresh context; this
@@ -77,9 +85,9 @@ def pipeline_next(ctx: click.Context, chosen_slug: str | None) -> None:
     if chosen_slug is not None:
         state = read_slug_state(store.planning_dir, chosen_slug)
         if state and state.get("phase"):
-            _advance_slug_consuming(ctx, store, chosen_slug, state["phase"])
+            _advance_slug_consuming(ctx, store, chosen_slug, state["phase"], agent)
             return
-        _advance_from_issue_type(ctx, store, chosen_slug)
+        _advance_from_issue_type(ctx, store, chosen_slug, agent)
         return
 
     states = list_slug_states(store.planning_dir)
@@ -90,7 +98,7 @@ def pipeline_next(ctx: click.Context, chosen_slug: str | None) -> None:
             raise click.UsageError(
                 f"Pipeline state for '{slug}' is corrupted (missing phase)."
             )
-        _advance_slug_consuming(ctx, store, slug, phase)
+        _advance_slug_consuming(ctx, store, slug, phase, agent)
         return
 
     slug = find_latest_creation_candidate(store)
@@ -99,7 +107,7 @@ def pipeline_next(ctx: click.Context, chosen_slug: str | None) -> None:
             "No active pipeline and no ready feature/task/bug issues to advance. "
             "Start with /plan, /brief, /bug, /implement, /test, /optimize, /memo, or /task."
         )
-    _advance_from_issue_type(ctx, store, slug)
+    _advance_from_issue_type(ctx, store, slug, agent)
 
 
 def _advance_slug_consuming(
@@ -107,6 +115,7 @@ def _advance_slug_consuming(
     store: MetaStore,
     slug: str,
     current_phase: str,
+    agent: str,
 ) -> None:
     """Walk PHASE_CHAIN for a slug already in flight through a slug-consuming phase."""
     next_phase = PHASE_CHAIN.get(current_phase)
@@ -114,13 +123,14 @@ def _advance_slug_consuming(
         click.echo(f"Pipeline complete after '{current_phase}' for #{slug}.")
         delete_slug_state(store.planning_dir, slug)
         return
-    _emit_next_phase(ctx, store, next_phase, slug)
+    _emit_next_phase(ctx, store, next_phase, slug, agent)
 
 
 def _advance_from_issue_type(
     ctx: click.Context,
     store: MetaStore,
     slug: str,
+    agent: str,
 ) -> None:
     """Advance a slug that has no in-flight state by mapping its issue type to a phase."""
     issue, _body = store.require_issue(slug)
@@ -131,7 +141,7 @@ def _advance_from_issue_type(
             f"Issue #{slug} has type '{issue_type}' which has no next phase. "
             "Only feature, task, and bug issues can start a pipeline."
         )
-    _emit_next_phase(ctx, store, next_phase, slug)
+    _emit_next_phase(ctx, store, next_phase, slug, agent)
 
 
 def _emit_next_phase(
@@ -139,10 +149,11 @@ def _emit_next_phase(
     store: MetaStore,
     next_phase: str,
     slug: str,
+    agent: str,
 ) -> None:
     """Expand the next phase's workflow, update per-slug state, and print to stdout."""
     rule_names = list(store.get_config("rules", []) or [])
-    content = expand_workflow(next_phase, slug, rule_names)
+    content = expand_workflow(next_phase, slug, rule_names, agent=agent)
     if content is None:
         raise click.UsageError(f"Workflow '{next_phase}' not found.")
 

@@ -35,7 +35,7 @@ For each conflicted path: Read the file, `jj show` the trunk change that introdu
 
 **Base is `dev@origin`** All diffs, comparisons, and scope resolution use the `dev` bookmark on the remote.
 
-- **Issue slug** — `{{ arguments() }}` matches an existing issue slug.
+- **Issue slug** — `<ARGS>` matches an existing issue slug.
   ```bash
   planwise view <slug>
   ```
@@ -43,7 +43,7 @@ For each conflicted path: Read the file, `jj show` the trunk change that introdu
 
 - **Free text** — anything else. Resolve to files by searching the codebase (grep, glob, project structure). Ask the user if ambiguous.
 
-- **None** — no `{{ arguments() }}` provided. Default to changed files:
+- **None** — no `<ARGS>` provided. Default to changed files:
   ```bash
   jj diff --from dev@origin --name-only
   ```
@@ -91,7 +91,7 @@ No hard caps. No subjective scoring. Convergence is the **only** termination sig
 
 ## Rules
 
-$RULES
+
 
 ## Main Loop
 
@@ -118,7 +118,7 @@ For each dimension, dispatch:
 > - Skipped — do not re-report (iteration 2+): `<set, or "None">`
 > - Failed — do not re-propose (iteration 2+): `<set, or "None">`
 > - Challenge context (if re-analysis triggered): `<critique + evidence + new files, or "None">`
-> - Rules: `<paste $RULES>`
+> - Rules: `<paste >`
 >
 > Return per § **Return contract**.
 
@@ -177,7 +177,7 @@ Dispatch fix agents sequentially — one per file (max 5 findings each):
 > - Target file(s): `<path(s)>`
 > - Findings: `<per finding — #, title, severity, @location, narrative>`
 > - Relevant ledger entries for this file: `<entries, or "None">`
-> - Rules: `<paste $RULES>`
+> - Rules: `<paste >`
 >
 > Return per § **Return contract (fix)**.
 
@@ -219,7 +219,7 @@ For each proposal from the triage plan (one at a time, sequentially):
    > - Target file(s): `<path(s)>`
    > - Proposal: `<title, hypothesis, change description>`
    > - Relevant ledger entries for this file: `<entries, or "None">`
-   > - Rules: `<paste $RULES>`
+   > - Rules: `<paste >`
    >
    > Return per § **Return contract (evolve)**.
 

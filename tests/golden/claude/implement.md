@@ -2,23 +2,23 @@
 description: "Implement all coding sub-features for a feature (automated, concurrent-safe)"
 ---
 
-# Implement Feature {{ arguments() }}
+# Implement Feature <ARGS>
 
-Implement every coding sub-feature of {{ arguments() }} in dependency order.
+Implement every coding sub-feature of <ARGS> in dependency order.
 
 **Assumed context:** this workflow runs inside a fresh jj workspace created by `pw claude`. Inter-feature concurrency (two features in parallel) is handled by the CLI — each `pw claude` session is its own sandbox off `dev@origin`, so parallel runs never share `@`. Intra-feature concurrency (sub-features in parallel) happens inside this workspace via subagent git worktrees.
 
 ## Step 1 — Preflight
 
 ```bash
-planwise view {{ arguments() }}
-planwise view {{ arguments() }} --field status
+planwise view <ARGS>
+planwise view <ARGS> --field status
 ```
 
 If status is `in-progress`, STOP — another run owns this feature. Other features being `in-progress` is fine (that's the inter-feature parallelism working). Otherwise:
 
 ```bash
-planwise status {{ arguments() }} in-progress
+planwise status <ARGS> in-progress
 ```
 
 Derive a kebab-case topic from the feature title. Prefix: `feat/` for features, `fix/` for fixes.
@@ -54,16 +54,16 @@ jj auto-snapshots the working copy on every command. Do not call `git` directly 
 
 ## Rules
 
-$RULES
+
 
 ## Step 3 — Execute dependency graph
 
-Loop until `planwise ready --children-of {{ arguments() }}` returns nothing. Each iteration:
+Loop until `planwise ready --children-of <ARGS>` returns nothing. Each iteration:
 
 ### 3a. Fetch the ready batch
 
 ```bash
-planwise ready --children-of {{ arguments() }}
+planwise ready --children-of <ARGS>
 ```
 
 Returns coding sub-features with no unmet dependencies (UAT and bugs excluded from scheduling; bug-labeled sub-features carry a `bug` label).
@@ -74,7 +74,7 @@ Returns coding sub-features with no unmet dependencies (UAT and bugs excluded fr
 planwise status <slug> in-progress
 ```
 
-{{ dispatch(task="one subagent per sub-feature, always in a worktree", prefix="3c. ") }}
+### 3c. Dispatch — one subagent per sub-feature, always in a worktree
 
 Do NOT rationalize skipping steps with: "This sub-feature is simple enough to implement inline", "I'll do the review at the end instead of per-group", or "The checkpoint is unnecessary since the previous group passed." If a step exists, execute it.
 
@@ -86,11 +86,11 @@ For each ready sub-feature, dispatch:
 
 > Read `src/planwise/workflows/_implement/execute.md` § **Sub-feature implementation**.
 > Inputs:
-> - Feature slug: `{{ arguments() }}`
+> - Feature slug: `<ARGS>`
 > - Sub-feature slug: `<slug>`
 > - Completed so far: `<slugs + one-line summaries>`
 > - Explore findings (if explore-first): `<paste or "None">`
-> - Rules: `<paste $RULES>`
+> - Rules: `<paste >`
 >
 > Return the report per § **Return contract**. If the sub-feature carries the `bug` label, follow § **Bug label branch**.
 
@@ -111,7 +111,7 @@ Let `N` = number of DONE / DONE_WITH_CONCERNS sub-features. BLOCKED and REPLAN c
 
 - **N > 1:** n-way merge the parallel branches onto the current feature tip.
   ```bash
-  jj new @ sub/<slug-a>@git sub/<slug-b>@git ... -m "merge: <slugs> (#{{ arguments() }})"
+  jj new @ sub/<slug-a>@git sub/<slug-b>@git ... -m "merge: <slugs> (#<ARGS>)"
   ```
 
 Check for conflicts:
@@ -143,7 +143,7 @@ jj git import
 - **BLOCKED:** STOP the run; report the blocker.
 - **REPLAN:** STOP; report the finding. Either patch the sub-feature body and re-dispatch, or escalate.
 
-Re-run `planwise ready --children-of {{ arguments() }}`. Repeat until empty.
+Re-run `planwise ready --children-of <ARGS>`. Repeat until empty.
 
 ## Step 4 — Cross-boundary review
 
@@ -162,18 +162,18 @@ Main agent reviews cumulative work for issues isolated subagents cannot see.
 
    > Read `src/planwise/workflows/_implement/review.md` § **Spec compliance**, § **Cross-boundary integrity**, § **Code quality**.
    > Inputs:
-   > - Feature slug: `{{ arguments() }}`
+   > - Feature slug: `<ARGS>`
    > - Changed files grouped by sub-feature: `<paste>`
    > - Boundary files (touched by >1 sub-feature): `<paste or "None">`
    > - Sub-feature bodies: `<paste planwise view outputs from Step 3>`
    > - Implementer concerns: `<concatenated DONE_WITH_CONCERNS text from Step 3c, or "None">`
-   > - Rules: `<paste $RULES>`
+   > - Rules: `<paste >`
    >
    > Return findings per § **Return contract**.
 
 4. **If findings returned,** fix and commit:
    ```bash
-   jj commit -m "ref: <specific fix> (#{{ arguments() }})"
+   jj commit -m "ref: <specific fix> (#<ARGS>)"
    ```
 
 ## Step 4.5 — Generate review tour
@@ -189,15 +189,15 @@ jj log -r 'dev@origin..@' -T builtin_log_oneline
 ```
 
 Bundle alongside:
-- Feature slug: `{{ arguments() }}`
+- Feature slug: `<ARGS>`
 - Sub-feature bodies: the per-sub-feature `planwise view` output already in context from Step 3
 - Implementer concerns: concatenated `DONE_WITH_CONCERNS` concern text from Step 3c reports, or `"None"`
 - Cross-boundary findings: flagged items from Step 4, or `"None"`
 
-{{ dispatch(task="Tour writer", detail="general-purpose, fresh context", agent="general-purpose") }}
+### Dispatch — Tour writer (general-purpose, fresh context)
 
 > Read `src/planwise/workflows/_implement/tour.md` § **Tour writer**. Inputs:
-> - Feature slug: `{{ arguments() }}`
+> - Feature slug: `<ARGS>`
 > - Diff stat: `<paste jj diff --stat output>`
 > - Patch: `<paste jj diff output>`
 > - Commit log: `<paste jj log output>`
@@ -218,9 +218,9 @@ Reject and re-dispatch once if any of these fail:
 If it fails twice, fall back to this body and log `tour generation failed` in the Step 5 report:
 
 ```markdown
-Tour unavailable — see plan: `planwise view {{ arguments() }}`
+Tour unavailable — see plan: `planwise view <ARGS>`
 
-Closes #{{ arguments() }}
+Closes #<ARGS>
 ```
 
 Hold the final tour Markdown in a variable `TOUR_BODY` for Step 5.
@@ -230,14 +230,14 @@ Hold the final tour Markdown in a variable `TOUR_BODY` for Step 5.
 Move UAT to ready only if every coding sub-feature is `done` (bug-labeled sub-features pending user verification block this):
 
 ```bash
-planwise list --children-of {{ arguments() }} --type uat | jq -r '.[0].id'
+planwise list --children-of <ARGS> --type uat | jq -r '.[0].id'
 planwise status <uat-slug> ready
 ```
 
 Move the feature:
 
 ```bash
-planwise status {{ arguments() }} in-review
+planwise status <ARGS> in-review
 ```
 
 Advance the bookmark to the feature tip. The revset picks the highest non-empty change in `dev@origin..@`, correct whether `@` is the tip or an empty change above it:
@@ -251,7 +251,7 @@ If jj rejects as non-fast-forward, investigate — do not force with `--allow-ba
 Report:
 
 ```
-Feature {{ arguments() }} complete.
+Feature <ARGS> complete.
 
 Workspace: <path to feature workspace>
 

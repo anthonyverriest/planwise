@@ -17,7 +17,7 @@ Artifacts maintained per run:
 
 The knowledge base is a living artifact — refactored like code, not archived like documents. Each domain file must pass the **cold start test**: an agent or developer reading only this file can act correctly in the domain without chasing other sources. Phase 4.5 verifies this with an isolated reader.
 
-## Target: Feature {{ arguments() }}
+## Target: Feature <the user's task>
 
 ## Writing principles
 
@@ -26,13 +26,13 @@ Every entry in the knowledge base serves two audiences: a developer scanning for
 ## Phase 1: Validate readiness
 
 ```bash
-planwise view {{ arguments() }} --field type
-planwise view {{ arguments() }} --field status
+planwise view <the user's task> --field type
+planwise view <the user's task> --field status
 ```
 
 **Guards:**
-- Type must be `feature`. If not → stop: `{{ arguments() }} is not a feature.`
-- Status must be `done` or `in-review`. If `in-review`, warn: `Feature {{ arguments() }} is in-review, not done. Proceeding — knowledge may be incomplete.` Any other status → stop: `Feature {{ arguments() }} is not complete (status: <status>). Finish the feature first.`
+- Type must be `feature`. If not → stop: `<the user's task> is not a feature.`
+- Status must be `done` or `in-review`. If `in-review`, warn: `Feature <the user's task> is in-review, not done. Proceeding — knowledge may be incomplete.` Any other status → stop: `Feature <the user's task> is not complete (status: <status>). Finish the feature first.`
 
 **Evidence check (warn-only, never block):**
 
@@ -52,8 +52,8 @@ Record the evidence state for Phase 7 — the report carries it forward so futur
 Right-size the pipeline to the feature. Read once:
 
 ```bash
-planwise list --children-of {{ arguments() }} --type sub-feature
-planwise list --children-of {{ arguments() }} --type bug
+planwise list --children-of <the user's task> --type sub-feature
+planwise list --children-of <the user's task> --type bug
 jj log -r 'description(glob:"optimize:*") & dev@origin..@' -T builtin_log_oneline
 ```
 
@@ -72,10 +72,10 @@ Collect the feature's artifacts and the existing knowledge base state.
 ### Step 1: Read the feature and sub-features
 
 ```bash
-planwise view {{ arguments() }}
-planwise list --children-of {{ arguments() }} --type sub-feature
-planwise list --children-of {{ arguments() }} --type bug
-planwise list --children-of {{ arguments() }} --type uat
+planwise view <the user's task>
+planwise list --children-of <the user's task> --type sub-feature
+planwise list --children-of <the user's task> --type bug
+planwise list --children-of <the user's task> --type uat
 planwise view <sub-feature-id>    # for each
 ```
 
@@ -91,7 +91,7 @@ jj log -r 'dev@origin..@' -T builtin_log_oneline --stat
 If the bookmark is already merged into `dev`:
 
 ```bash
-jj log -r 'description(glob:"*'"{{ arguments() }}"'*") & ::dev@origin & merges()' -T builtin_log_oneline --stat
+jj log -r 'description(glob:"*'"<the user's task>"'*") & ::dev@origin & merges()' -T builtin_log_oneline --stat
 ```
 
 Extract commit SHAs (needed for `source:` fields), commit descriptions (encode decisions), reverts and abandons (encode gotchas), and `optimize:` commits (what was fixed post-implementation).
@@ -145,7 +145,7 @@ Launch subagents in one message. **Trivial** scale: one combined subagent covers
 
 The merge protocol (detect contradictions → keep / update / remove / add, with `[SUPERSEDED]` and `[VERIFY]` flagging) is defined in `_memo/distill.md § **Merge protocol**` — subagents apply it. The orchestrator resolves remaining flags in Phase 4 Step 1.
 
-{{ dispatch(task="distillation subagents", detail="general-purpose", agent="general-purpose") }}
+### Dispatch — distillation subagents (planwise-worker)
 
 **Standard / Large scale** (three parallel dispatches):
 
@@ -198,7 +198,7 @@ Collect entries carried forward unchanged. Exclude entries already marked `[SUPE
 
 Each section can only be contradicted by specific evidence classes. Split into focused calls with bounded context. Launch in parallel. Skip any dimension with zero kept entries. Four dimensions: Architecture & Decisions, Patterns, Gotchas, Constraints — scope definitions live in `_memo/sweep.md § **Dimensions**`.
 
-{{ dispatch(task="contradiction detectors", detail="one per non-empty dimension, parallel") }}
+### Dispatch — contradiction detectors (one per non-empty dimension, parallel)
 
 > Read `src/planwise/workflows/_memo/sweep.md` § **Dimensional contradiction detector**.
 > Inputs:
@@ -452,7 +452,7 @@ Distill generalizable planning lessons from this feature's execution signals. Ou
 ### Step 1: Collect the applied-lessons block
 
 ```bash
-planwise view {{ arguments() }}
+planwise view <the user's task>
 planwise view <sub-feature-id>    # for every sub-feature from Phase 2 Step 1 (any type)
 ```
 
@@ -462,11 +462,11 @@ Extract the `## Lessons Applied` block from the feature body (populated by `/pla
 test -f planwise/knowledge/_lessons.md && cat planwise/knowledge/_lessons.md
 ```
 
-{{ dispatch(task="lessons distiller", detail="general-purpose", agent="general-purpose", prefix="Step 2: ") }}
+### Step 2: Dispatch — lessons distiller (planwise-worker)
 
 > Read `src/planwise/workflows/_memo/lessons.md` § **Signal classes**, § **Applied-lesson scoring**, § **Cluster and gate**, § **Dedupe**, § **Promotion and pruning rules**, § **Entry format**, § **Quality gate**.
 > Inputs:
-> - Feature id: `{{ arguments() }}`
+> - Feature id: `<the user's task>`
 > - Domain tag: `<domain-name>`
 > - Current feature number: `<integer, for age-based pruning>`
 > - Planning-defect signals from Phase 2: `<sub-features added post-plan | bug sub-features | jj op log abandons & --patch discards | optimize verdicts | UAT failures | multi-attempt change-ids>`
@@ -558,7 +558,7 @@ If the revset returns empty (no knowledge changes — distillation produced no d
 ## Phase 7: Report
 
 ```
-Knowledge base updated for Feature {{ arguments() }}.
+Knowledge base updated for Feature <the user's task>.
 
 Scale:   <trivial | standard | large>
 Evidence: test=<N commits> optimize=<N commits>  <full | partial (<missing class>) | thin>

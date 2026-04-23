@@ -6,9 +6,9 @@ description: "Run a sync pipeline step-by-step with human supervision"
 
 Run a sync pipeline with automated execution and human supervision. The agent executes each step, diagnoses failures, attempts fixes, and pauses at human gates for approval.
 
-## Target pipeline: {{ arguments() }}
+## Target pipeline: <ARGS>
 
-Default pipeline path: `planwise/sync.yml`. If `{{ arguments() }}` is a path to a YAML file, use that instead.
+Default pipeline path: `planwise/sync.yml`. If `<ARGS>` is a path to a YAML file, use that instead.
 
 ## Process
 
@@ -30,7 +30,7 @@ planwise sync reset --all
 
 **If no state exists**: confirm with the user before starting.
 
-{{ ask(prompt="Pipeline '<name>' has N steps. Ready to start?") }}
+Use `AskUserQuestion` tool: **"Pipeline '<name>' has N steps. Ready to start?"**
 
 ### Step 2: Walk the pipeline
 
@@ -44,7 +44,7 @@ If the step has `gate: human`, show the step details before executing:
 - Plugin and action (or inline command)
 - What the command will do
 
-{{ ask(prompt="Step N: '<name>' — <description>. Approve, skip, or abort?") }}
+Use `AskUserQuestion` tool: **"Step N: '<name>' — <description>. Approve, skip, or abort?"**
 
 - **approve**: proceed to execution
 - **skip**: mark step as skipped, continue to next
@@ -54,7 +54,7 @@ If the step has `gate: human`, show the step details before executing:
 
 Before executing, check if any prior step that this step depends on was **skipped** or **failed**. If so:
 
-{{ ask(prompt="Step N: '<name>' depends on '<prior step>' which was <skipped/failed>. Proceed anyway, skip, or abort?") }}
+Use `AskUserQuestion` tool: **"Step N: '<name>' depends on '<prior step>' which was <skipped/failed>. Proceed anyway, skip, or abort?"**
 
 #### 2c. Execute the step
 
@@ -80,7 +80,7 @@ Then reason about the failure:
 - Examine relevant files in the codebase based on the error output
 - Propose a different fix
 
-{{ ask(prompt="Step '<name>' failed. <diagnosis>. I'd like to try: <proposed fix>. Approve?") }}
+Use `AskUserQuestion` tool: **"Step '<name>' failed. <diagnosis>. I'd like to try: <proposed fix>. Approve?"**
 
 If approved, execute the fix, then re-run the step:
 ```bash
@@ -96,7 +96,7 @@ The plugin knows what went wrong but has no automated fix. This is where you rea
 4. Cross-reference with other pipeline steps — does this failure relate to another tool's state?
 5. Propose a fix based on your analysis
 
-{{ ask(prompt="Step '<name>' failed: <matched failure message>. After investigating, I believe: <diagnosis>. Proposed fix: <fix>. Approve?") }}
+Use `AskUserQuestion` tool: **"Step '<name>' failed: <matched failure message>. After investigating, I believe: <diagnosis>. Proposed fix: <fix>. Approve?"**
 
 If approved, execute the fix, then re-run:
 ```bash
@@ -113,7 +113,7 @@ Unknown failure — this is the key scenario where cross-tool reasoning provides
 4. Check if the failure relates to a previous step's output or another tool's state
 5. Trace the error across tool boundaries if needed (e.g., a migration failing because infrastructure hasn't been provisioned yet)
 
-{{ ask(prompt="Step '<name>' failed with an unexpected error. <full analysis>. Proposed fix: <fix>. Approve?") }}
+Use `AskUserQuestion` tool: **"Step '<name>' failed with an unexpected error. <full analysis>. Proposed fix: <fix>. Approve?"**
 
 If approved, execute the fix, then re-run:
 ```bash
@@ -122,7 +122,7 @@ planwise sync exec <step_name> --pipeline <path> --force
 
 **If 3 fix attempts fail for the same step**, stop trying and escalate:
 
-{{ ask(prompt="Step '<name>' has failed 3 times. <summary of attempts>. Would you like to: skip this step, abort the pipeline, or tell me what to try?") }}
+Use `AskUserQuestion` tool: **"Step '<name>' has failed 3 times. <summary of attempts>. Would you like to: skip this step, abort the pipeline, or tell me what to try?"**
 
 ### Step 3: Completion report
 

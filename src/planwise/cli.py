@@ -15,6 +15,7 @@ from planwise.commands import (
     claude,
     completion,
     crud,
+    cursor,
     deps,
     lifecycle,
     metadata,
@@ -71,12 +72,12 @@ def _ensure_structure(planning_dir: Path) -> None:
         lock.touch()
 
 
-def _seed_layout(layout: str, project_dir: Path) -> tuple[Path, bool]:
-    """Append the layout section to CLAUDE.md.
+def _seed_layout(layout: str, project_dir: Path, agent: str) -> tuple[Path, bool]:
+    """Append the layout section to the active agent's instruction file.
 
     Warns via stderr if the <layout> section is already present (user edits preserved).
     """
-    path, skipped = inject_layout_section(layout, project_dir)
+    path, skipped = inject_layout_section(layout, project_dir, agent=agent)
     if skipped:
         click.echo(
             f"Layout already present in {path}; skipping "
@@ -120,7 +121,7 @@ def cli(ctx: click.Context, text: bool) -> None:
     "layout",
     default=None,
     callback=validate_layout_callback,
-    help="Package-layout preset to seed into the project's CLAUDE.md (one-time, user-owned after).",
+    help="Package-layout preset to seed into the active agent's instruction file (one-time, user-owned after).",
 )
 @click.pass_context
 def init(
@@ -180,9 +181,10 @@ def init(
     layout_path = None
     layout_skipped = False
     if layout:
+        layout_agent = agent or existing.get("agent") or "claude"
         if not agent:
-            inject_agent_instructions("claude", planning_dir.parent)
-        layout_path, layout_skipped = _seed_layout(layout, planning_dir.parent)
+            inject_agent_instructions(layout_agent, planning_dir.parent)
+        layout_path, layout_skipped = _seed_layout(layout, planning_dir.parent, layout_agent)
 
     if is_text(ctx):
         verb = "Reconciled" if is_initialized else "Initialized"
@@ -264,6 +266,7 @@ def migrate(ctx: click.Context) -> None:
 claude.register(cli)
 completion.register(cli)
 crud.register(cli)
+cursor.register(cli)
 lifecycle.register(cli)
 query.register(cli)
 deps.register(cli)

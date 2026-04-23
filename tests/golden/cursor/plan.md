@@ -11,11 +11,11 @@ Do NOT write implementation code — this is planning only.
 
 ## What the user wants to work on
 
-{{ arguments() }}
+<the user's task>
 
 ## Phase 0: Resolve input
 
-- **Issue reference** — `{{ arguments() }}` matches an existing issue slug.
+- **Issue reference** — `<the user's task>` matches an existing issue slug.
 - **Free text** — anything else.
 
 If issue reference: `planwise view <slug>` and use the issue title/body as starting context for Phase 1. If free text: proceed directly to Phase 1.
@@ -28,7 +28,7 @@ Assemble the feature body through dialogue with the user — User Story, Success
 
 If the input describes a problem or bug, ask "Why?" to trace from symptom to root cause before writing the User Story. The User Story addresses the root problem, not the surface symptom.
 
-{{ dispatch(task="KB retriever", detail="Explore, quick", agent="Explore", mode="quick") }}
+### Dispatch — KB retriever (Explore, quick)
 
 > Read `src/planwise/workflows/_plan/analyze.md` § **Knowledge base lookup**. Execute it against keywords: `<user request keywords>`. Return the structured summary the protocol describes.
 
@@ -82,7 +82,7 @@ For each sub-feature, also determine:
 
 **Parallelism is implicit:** sub-features with the same dependencies and no dependency on each other are naturally parallel — `ready` will return them together.
 
-{{ dispatch(task="Assumption verifier", detail="Explore, quick", agent="Explore", mode="quick") }}
+### Dispatch — Assumption verifier (Explore, quick)
 
 After Technical Context is drafted:
 
@@ -96,11 +96,11 @@ Present the completed feature body + sub-feature list + execution strategy to th
 
 Dispatch in parallel:
 
-{{ dispatch(task="Impact analyzer", detail="Explore, medium", agent="Explore", mode="medium") }}
+### Dispatch — Impact analyzer (Explore, medium)
 
 > Read `src/planwise/workflows/_plan/challenge.md` § **Impact analysis**. Execute against Technical Context: `<file list, types, schemas, interfaces>`. KB Connections from Phase 1 (if any): `<connections>`. Return the downstream-consumer table.
 
-{{ dispatch(task="Red team", detail="general-purpose, fresh context", agent="general-purpose") }}
+### Dispatch — Red team (planwise-worker, fresh context)
 
 > Read `src/planwise/workflows/_plan/challenge.md` § **Pre-mortem + Risk stress-test**. Input — feature body + sub-feature list:
 > ```
@@ -112,7 +112,9 @@ Integrate returns: fold hidden dependencies into existing sub-features or raise 
 
 ### User gate
 
-{{ ask(prompt="Ready to create issues, or stop here?", choices=[["no", "stop. Feature body and sub-feature list stay in conversation for later."], ["yes", "run the Pre-creation checklist, then proceed to Phase 3."]]) }}
+Use `AskQuestion` if available (fallback: ask in chat): **"Ready to create issues, or stop here?"**
+- If no -> stop. Feature body and sub-feature list stay in conversation for later.
+- If yes -> run the Pre-creation checklist, then proceed to Phase 3.
 
 ### Pre-creation checklist
 
@@ -146,7 +148,7 @@ planwise status <feature-slug> ready
 
 ### Step 1.5 — Pattern bank + Buildability
 
-{{ dispatch(task="Pattern bank", detail="up to 3 Explore agents in parallel", level=4, agent="Explore") }}
+#### Dispatch — Pattern bank (up to 3 Explore agents in parallel)
 
 Assign each agent one slice of the Technical Context. Typical split:
 - Agent 1: DB + shared layer
@@ -163,7 +165,7 @@ Compile the returns into a single **pattern bank** held in main thread. This is 
 
 **Gate:** do not proceed until the pattern bank is complete. If an agent flags missing files or unexpected structure, resolve with the user first.
 
-{{ dispatch(task="Buildability reviewer", detail="Explore, quick", level=4, agent="Explore", mode="quick") }}
+#### Dispatch — Buildability reviewer (Explore, quick)
 
 > Read `src/planwise/workflows/_plan/create.md` § **Buildability review**. Pattern bank: `<paste>`. Sub-feature list: `<paste>`. Return per-sub-feature Constraint additions.
 
@@ -173,7 +175,7 @@ Merge returned Constraints into each sub-feature's Constraints block when its bo
 
 For each sub-feature, dispatch one subagent:
 
-{{ dispatch(task="Sub-feature body writer", detail="general-purpose", level=4, agent="general-purpose") }}
+#### Dispatch — Sub-feature body writer (planwise-worker)
 
 > Read `src/planwise/workflows/_plan/create.md` § **Sub-feature body writer**. Inputs:
 > - Sub-feature: `<title, one-line scope, agent approach, dependencies>`

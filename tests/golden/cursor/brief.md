@@ -9,11 +9,11 @@ Do NOT write implementation code — this is planning only.
 
 ## What the user wants to work on
 
-{{ arguments() }}
+<the user's task>
 
 ## Phase 0: Resolve input
 
-- **Issue reference** — `{{ arguments() }}` matches an existing issue slug (e.g., `user-auth`, `login-endpoint`).
+- **Issue reference** — `<the user's task>` matches an existing issue slug (e.g., `user-auth`, `login-endpoint`).
 - **Free text** — anything else.
 
 ### If issue reference
@@ -168,7 +168,9 @@ If this reveals genuine technical unknowns, investigate the codebase and report 
 
 Revise the task body based on findings, or confirm it holds.
 
-{{ ask(prompt="Task spec ready. Create the issue, or stop here?", choices=[["no", "stop. The task body stays in conversation for later."], ["yes", "proceed to Phase 3."]]) }}
+Use `AskQuestion` if available (fallback: ask in chat): **"Task spec ready. Create the issue, or stop here?"**
+- If no -> stop. The task body stays in conversation for later.
+- If yes -> proceed to Phase 3.
 
 ### Pre-creation checklist
 
