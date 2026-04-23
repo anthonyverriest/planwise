@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and discussion
+    url: https://github.com/anthonyverriest/planwise/discussions
+    about: Ask questions, share ideas, or discuss usage with the community.
+  - name: Documentation
+    url: https://github.com/anthonyverriest/planwise#readme
+    about: Check the README and docs before filing an issue.

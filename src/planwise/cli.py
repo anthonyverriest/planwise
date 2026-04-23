@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import click
@@ -72,6 +74,47 @@ def _ensure_structure(planning_dir: Path) -> None:
         lock.touch()
 
 
+def _ensure_vcs(project_dir: Path) -> dict:
+    """Ensure a colocated jj+git repo exists at project_dir.
+
+    Planwise workflows require jj colocated with git. If `.jj/` is absent,
+    run `jj git init --colocate` (works whether or not `.git/` already exists).
+    No-op if `.jj/` is present. Hard-errors if the `jj` binary is missing,
+    since downstream workflows cannot run without it.
+    """
+    jj_dir = project_dir / ".jj"
+    git_dir = project_dir / ".git"
+
+    if jj_dir.is_dir():
+        return {"action": "skipped", "reason": "jj already initialized"}
+
+    if shutil.which("jj") is None:
+        raise click.UsageError(
+            "jj is required by planwise workflows but was not found on PATH. "
+            "Install from https://jj-vcs.github.io/jj/ or re-run with --no-vcs."
+        )
+
+    had_git = git_dir.is_dir()
+    try:
+        subprocess.run(
+            ["jj", "git", "init", "--colocate"],
+            cwd=project_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise click.ClickException(
+            f"`jj git init --colocate` failed: {e.stderr.strip() or e.stdout.strip()}"
+        ) from e
+
+    return {
+        "action": "colocated" if had_git else "initialized",
+        "jj": True,
+        "git": True,
+    }
+
+
 def _seed_layout(layout: str, project_dir: Path, agent: str) -> tuple[Path, bool]:
     """Append the layout section to the active agent's instruction file.
 
@@ -123,6 +166,13 @@ def cli(ctx: click.Context, text: bool) -> None:
     callback=validate_layout_callback,
     help="Package-layout preset to seed into the active agent's instruction file (one-time, user-owned after).",
 )
+@click.option(
+    "--no-vcs",
+    "no_vcs",
+    is_flag=True,
+    default=False,
+    help="Skip jj/git colocated init (not recommended; workflows assume jj).",
+)
 @click.pass_context
 def init(
     ctx: click.Context,
@@ -131,6 +181,7 @@ def init(
     agent: str | None,
     rules: tuple[str, ...],
     layout: str | None,
+    no_vcs: bool,
 ) -> None:
     """Initialize or reconcile the planning directory.
 
@@ -160,6 +211,10 @@ def init(
             raise click.UsageError("--project and --prefix are required for first init.")
         final_project = project
         final_prefix = prefix
+
+    vcs_result: dict | None = None
+    if not no_vcs and not is_initialized:
+        vcs_result = _ensure_vcs(planning_dir.parent)
 
     _ensure_structure(planning_dir)
 
@@ -191,6 +246,10 @@ def init(
         click.echo(
             f"{verb} planwise for project '{final_project}' (prefix: {final_prefix}) in {planning_dir}"
         )
+        if vcs_result and vcs_result.get("action") == "initialized":
+            click.echo(f"Initialized colocated jj+git repo in {planning_dir.parent}")
+        elif vcs_result and vcs_result.get("action") == "colocated":
+            click.echo(f"Added jj colocation to existing git repo in {planning_dir.parent}")
         if config.get("rules"):
             click.echo(f"Rules: {', '.join(config['rules'])}")
         if agent_path:
@@ -207,6 +266,8 @@ def init(
             "path": str(planning_dir),
             "reconciled": is_initialized,
         }
+        if vcs_result:
+            result["vcs"] = vcs_result
         if config.get("rules"):
             result["rules"] = config["rules"]
         if agent_path:

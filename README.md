@@ -39,9 +39,9 @@ Workflows drive [**jj (Jujutsu)**](https://github.com/jj-vcs/jj) in **colocated 
 
 ```bash
 cargo install --locked --bin jj jj-cli        # or: brew install jj
-cd your-project
-jj git init --colocate
 ```
+
+`pw init` handles the colocation for you: if the project directory has no `.jj/`, it runs `jj git init --colocate` (creating `.git/` too if needed, or adding jj alongside an existing git repo). Pass `--no-vcs` to skip.
 
 Every `jj commit` / `jj rebase` / `jj git push` roundtrips to git. Conventional commits land on the remote.
 
@@ -284,7 +284,7 @@ No manual workspace setup. Workflows detect non-default workspaces and adjust (s
 
 | Command | Description |
 |---------|-------------|
-| `init --project "name" --prefix "XX" [--agent claude\|cursor] [--rules python] [--layout python-web]` | Initialize planning (re-run with flags to update) |
+| `init --project "name" --prefix "XX" [--agent claude\|cursor] [--rules python] [--layout python-web] [--no-vcs]` | Initialize planning + colocated jj+git (re-run with flags to update) |
 | `create <feature\|sub-feature\|task\|uat\|bug> "title"` | Create issue (body via stdin) |
 | `view <slug>` | View an issue |
 | `edit <slug> --title/--body/--label/--agent` | Edit an issue |

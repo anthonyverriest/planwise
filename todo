@@ -1,9 +1,6 @@
 - guidelines
 - monitoring of agents (channels)
-- lang, check -> isntead inject at imple ? test ?
-- experience
 - typescript-web, networking, secuirty rules
-- git concurrent branches
 - audit skill
 - auto update on error
 
@@ -13,9 +10,6 @@
 - add subagents type to lower token usage
 - lower token transmissions to subagents (shared artifcats)
 
-- add init agent that does walkthough wtih jj
-
-- claude code to pw claude
 - recommendations ml?
 - tdd in impelent and task ?
 - add exploratory -> plan phase
